@@ -12,8 +12,8 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
 
 ## Tasks
 
-- [ ] 1. Project scaffolding and infrastructure setup
-  - [ ] 1.1 Initialize Rust project with Cargo and dependencies
+- [-] 1. Project scaffolding and infrastructure setup
+  - [x] 1.1 Initialize Rust project with Cargo and dependencies
     - Create `loom-engine/` directory with `Cargo.toml`
     - Add dependencies: axum, tokio (full features), sqlx (postgres, runtime-tokio, tls-rustls), pgvector, serde, serde_json, reqwest, sha2, uuid, chrono, tracing, tracing-subscriber, tower, tower-http, proptest (dev)
     - Create directory structure: `src/`, `src/db/`, `src/llm/`, `src/pipeline/offline/`, `src/pipeline/online/`, `src/api/`, `src/worker/`, `src/types/`, `migrations/`, `prompts/`
@@ -22,7 +22,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Create `.env.example` with all configuration variables
     - _Requirements: 45.1, 45.5, 52.6_
 
-  - [ ] 1.2 Create Docker Compose configuration with five containers
+  - [x] 1.2 Create Docker Compose configuration with five containers
     - Write `docker-compose.yml` with five services: loom-engine, loom-dashboard, postgres, ollama, caddy
     - Configure PostgreSQL 16 container with pgvector and pgAudit extensions, persistent volume, port 5432 (internal only)
     - Configure Ollama container with GPU passthrough, model volume for gemma4:26b-a4b-q4, gemma4:e4b, nomic-embed-text

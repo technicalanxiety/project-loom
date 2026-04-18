@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Post-Task Documentation",
+  "description": "After a spec task completes, generates a brief summary of what was implemented, any design decisions made, and what to test.",
+  "version": "1",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "The spec task just completed. Provide a brief documentation summary: 1) What was implemented (files created/modified). 2) Key design decisions made and why. 3) Any deviations from the spec or assumptions made. 4) What to test manually. 5) Any follow-up work or TODOs. Keep it concise — this is for Jason's reference, not a novel."
+  }
+}

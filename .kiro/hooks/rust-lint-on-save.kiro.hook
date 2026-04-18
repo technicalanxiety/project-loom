@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "name": "Rust Lint on Save",
+  "description": "Runs cargo fmt --check and cargo clippy on Rust file saves to catch formatting and lint issues immediately.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "loom-engine/**/*.rs"
+    ]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "cd loom-engine && cargo fmt --check 2>&1 && cargo clippy --no-deps -- -D warnings 2>&1",
+    "timeout": 120
+  }
+}

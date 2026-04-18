@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Run Tests After Task",
+  "description": "Runs the full test suite after a spec task is marked complete to verify the implementation is correct.",
+  "version": "1",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "cd loom-engine && cargo nextest run 2>&1",
+    "timeout": 180
+  }
+}

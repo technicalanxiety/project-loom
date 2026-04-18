@@ -1,0 +1,41 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:/Projects/project-loom"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://loom:loom@localhost:5432/loom"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

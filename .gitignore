@@ -22,11 +22,29 @@ loom-dashboard/.vite/
 docker-compose.override.yml
 
 # =========================
-# Environment
+# Environment & Secrets
 # =========================
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
+
+# Secret files — never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
+*.keystore
+**/secrets/
+**/credentials/
+*.secret
+*.secrets.json
+*.credentials.json
+service-account*.json
 
 # =========================
 # IDE / Editor

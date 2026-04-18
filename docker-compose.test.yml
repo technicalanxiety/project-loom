@@ -1,0 +1,29 @@
+## Test-only Docker Compose override
+## Usage: docker-compose -f docker-compose.test.yml up -d postgres-test
+## Spins up an isolated Postgres instance for integration tests.
+## Does NOT affect the main development database.
+
+version: "3.9"
+
+services:
+  postgres-test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: loom_test
+      POSTGRES_PASSWORD: loom_test
+      POSTGRES_DB: loom_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loom_test -d loom_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - loom-test-net
+
+networks:
+  loom-test-net:
+    driver: bridge

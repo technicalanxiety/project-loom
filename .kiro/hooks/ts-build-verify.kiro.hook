@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "name": "Dashboard Build Verify",
+  "description": "Runs tsc type checking after TypeScript file edits to verify the dashboard still compiles.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "loom-dashboard/**/*.ts",
+      "loom-dashboard/**/*.tsx"
+    ]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "cd loom-dashboard && npx tsc --noEmit 2>&1",
+    "timeout": 30
+  }
+}

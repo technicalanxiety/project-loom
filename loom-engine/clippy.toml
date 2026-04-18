@@ -1,0 +1,4 @@
+# Clippy configuration for loom-engine
+# Stricter than defaults — catches common mistakes early
+too-many-arguments-threshold = 8
+type-complexity-threshold = 300

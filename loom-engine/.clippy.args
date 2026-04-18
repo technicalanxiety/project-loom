@@ -1,0 +1,12 @@
+# Clippy lint levels — referenced by CI and hooks
+# Deny: these break the build
+-D clippy::unwrap_used
+-D clippy::expect_used
+-D clippy::panic
+# Warn: these should be fixed but don't block
+-W clippy::pedantic
+-W clippy::nursery
+# Allow: these conflict with our style or are too noisy
+-A clippy::module_name_repetitions
+-A clippy::must_use_candidate
+-A clippy::missing_errors_doc

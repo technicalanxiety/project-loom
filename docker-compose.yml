@@ -1,17 +1,24 @@
 version: "3.9"
 
 services:
-  # ─── PostgreSQL 16 with pgvector ───────────────────────────
+  # ─── PostgreSQL 16 with pgvector + pgAudit ─────────────────
   postgres:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: loom
       POSTGRES_PASSWORD: loom
       POSTGRES_DB: loom
-    ports:
-      - "5432:5432"
+    # Port 5432 is internal only — no host mapping.
+    # Access postgres via the loom-net Docker network.
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pgaudit"
+      - "-c"
+      - "pgaudit.log=write"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U loom -d loom"]
       interval: 5s
@@ -21,6 +28,10 @@ services:
       - loom-net
 
   # ─── Ollama (Local LLM Inference) ─────────────────────────
+  # After first start, pull the required models:
+  #   docker compose exec ollama ollama pull gemma4:26b-a4b-q4
+  #   docker compose exec ollama ollama pull gemma4:e4b
+  #   docker compose exec ollama ollama pull nomic-embed-text
   ollama:
     image: ollama/ollama:latest
     ports:
@@ -48,6 +59,14 @@ services:
       context: ./loom-engine
       dockerfile: Dockerfile
     env_file: .env
+    environment:
+      # Explicit Docker-internal hostnames override any .env values
+      DATABASE_URL: "postgres://loom:loom@postgres:5432/loom"
+      DATABASE_URL_ONLINE: "postgres://loom:loom@postgres:5432/loom?pool_size=10"
+      DATABASE_URL_OFFLINE: "postgres://loom:loom@postgres:5432/loom?pool_size=5"
+      OLLAMA_URL: "http://ollama:11434"
+      LOOM_HOST: "0.0.0.0"
+      LOOM_PORT: "8080"
     ports:
       - "8080:8080"
     depends_on:
