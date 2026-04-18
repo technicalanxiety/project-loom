@@ -1,0 +1,3 @@
+-- 010_snapshots.sql
+-- Hot tier snapshots
+-- TODO: Implement CREATE TABLE loom_snapshots

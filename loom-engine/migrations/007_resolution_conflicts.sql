@@ -1,0 +1,3 @@
+-- 007_resolution_conflicts.sql
+-- Entity resolution conflict tracking
+-- TODO: Implement CREATE TABLE loom_resolution_conflicts

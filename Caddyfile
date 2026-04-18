@@ -1,0 +1,28 @@
+localhost:443 {
+	# MCP endpoints → loom-engine
+	handle /mcp/* {
+		reverse_proxy loom-engine:8080
+	}
+
+	# REST API → loom-engine
+	handle /api/* {
+		reverse_proxy loom-engine:8080
+	}
+
+	# Dashboard API → loom-engine
+	handle /dashboard/api/* {
+		reverse_proxy loom-engine:8080
+	}
+
+	# Everything else → dashboard static files
+	handle {
+		root * /srv/dashboard
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

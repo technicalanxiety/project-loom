@@ -1,0 +1,102 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL 16 with pgvector ───────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: loom
+      POSTGRES_PASSWORD: loom
+      POSTGRES_DB: loom
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loom -d loom"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - loom-net
+
+  # ─── Ollama (Local LLM Inference) ─────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - loom-net
+
+  # ─── Loom Engine (Rust Binary) ─────────────────────────────
+  loom-engine:
+    build:
+      context: ./loom-engine
+      dockerfile: Dockerfile
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - loom-net
+
+  # ─── Loom Dashboard (React SPA) ───────────────────────────
+  loom-dashboard:
+    build:
+      context: ./loom-dashboard
+      dockerfile: Dockerfile
+    volumes:
+      - dashboard_dist:/app/dist
+    networks:
+      - loom-net
+
+  # ─── Caddy (Reverse Proxy + TLS + Static Files) ───────────
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - dashboard_dist:/srv/dashboard:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - loom-engine
+      - loom-dashboard
+    networks:
+      - loom-net
+
+volumes:
+  pgdata:
+  ollama_data:
+  dashboard_dist:
+  caddy_data:
+  caddy_config:
+
+networks:
+  loom-net:
+    driver: bridge

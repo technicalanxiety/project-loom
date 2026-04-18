@@ -1,0 +1,3 @@
+-- 003_predicate_packs.sql
+-- Predicate packs: Domain vocabulary sets
+-- TODO: Implement CREATE TABLE loom_predicate_packs + seed core pack

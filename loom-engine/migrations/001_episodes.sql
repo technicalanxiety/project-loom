@@ -1,0 +1,3 @@
+-- 001_episodes.sql
+-- Episodes: Immutable evidence layer
+-- TODO: Implement CREATE TABLE loom_episodes + indexes

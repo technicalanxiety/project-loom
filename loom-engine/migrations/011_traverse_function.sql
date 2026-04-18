@@ -1,0 +1,3 @@
+-- 011_traverse_function.sql
+-- Graph traversal function (1-2 hop, cycle-safe)
+-- TODO: Implement CREATE OR REPLACE FUNCTION loom_traverse(...)

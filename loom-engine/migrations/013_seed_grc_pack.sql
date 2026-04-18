@@ -1,0 +1,3 @@
+-- 013_seed_grc_pack.sql
+-- GRC pack + 23 regulatory predicates
+-- TODO: Implement INSERT INTO loom_predicate_packs + loom_predicates for GRC pack

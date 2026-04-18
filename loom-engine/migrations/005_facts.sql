@@ -1,0 +1,3 @@
+-- 005_facts.sql
+-- Facts: Graph edges + fact serving state
+-- TODO: Implement CREATE TABLE loom_facts + loom_fact_state + indexes

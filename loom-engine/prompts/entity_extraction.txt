@@ -1,0 +1,2 @@
+<!-- Entity extraction prompt template — loaded at startup, not compiled -->
+<!-- TODO: Implement entity extraction prompt -->

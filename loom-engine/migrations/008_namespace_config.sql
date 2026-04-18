@@ -1,0 +1,3 @@
+-- 008_namespace_config.sql
+-- Namespace configuration (includes predicate_packs TEXT[] column)
+-- TODO: Implement CREATE TABLE loom_namespace_config

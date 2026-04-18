@@ -1,0 +1,3 @@
+-- 012_seed_core_predicates.sql
+-- Seed 25 core predicates into loom_predicates
+-- TODO: Implement INSERT INTO loom_predicates for core pack

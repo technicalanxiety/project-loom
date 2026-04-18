@@ -1,0 +1,3 @@
+-- 006_procedures.sql
+-- Procedures: Candidate behavioral patterns
+-- TODO: Implement CREATE TABLE loom_procedures

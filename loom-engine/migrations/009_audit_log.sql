@@ -1,0 +1,3 @@
+-- 009_audit_log.sql
+-- Audit log for compilation traces
+-- TODO: Implement CREATE TABLE loom_audit_log

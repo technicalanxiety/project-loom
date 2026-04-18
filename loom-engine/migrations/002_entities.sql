@@ -1,0 +1,3 @@
+-- 002_entities.sql
+-- Entities: Graph nodes + entity serving state
+-- TODO: Implement CREATE TABLE loom_entities + loom_entity_state + indexes

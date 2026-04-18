@@ -1,0 +1,3 @@
+-- 004_predicates.sql
+-- Canonical predicate registry with pack column + regulatory category
+-- TODO: Implement CREATE TABLE loom_predicates + loom_predicate_candidates

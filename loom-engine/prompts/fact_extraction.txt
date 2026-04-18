@@ -1,0 +1,2 @@
+<!-- Pack-aware fact extraction prompt template -->
+<!-- TODO: Implement fact extraction prompt with dynamic predicate pack injection -->

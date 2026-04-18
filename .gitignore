@@ -1,0 +1,62 @@
+# =========================
+# Rust
+# =========================
+/target/
+loom-engine/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# =========================
+# Node / React
+# =========================
+node_modules/
+loom-dashboard/node_modules/
+loom-dashboard/dist/
+loom-dashboard/.vite/
+*.tsbuildinfo
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Environment
+# =========================
+.env
+.env.local
+.env.*.local
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Database
+# =========================
+pgdata/
+
+# =========================
+# Ollama
+# =========================
+ollama_data/
+
+# =========================
+# Caddy
+# =========================
+caddy_data/
+caddy_config/
