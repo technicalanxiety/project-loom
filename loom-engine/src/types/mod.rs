@@ -1,4 +1,7 @@
-// loom-engine/src/types — Shared type definitions (serde serializable)
+//! Shared type definitions for the loom-engine.
+//!
+//! All types that cross module boundaries are defined here with serde
+//! serialization. Database row types derive `sqlx::FromRow`.
 
 pub mod audit;
 pub mod classification;

@@ -4,14 +4,13 @@
   "description": "Runs cargo check after Rust file edits to verify the project still compiles.",
   "version": "1",
   "when": {
-    "type": "fileEdited",
-    "patterns": [
-      "loom-engine/**/*.rs"
-    ]
+    "type": "userTriggered"
   },
   "then": {
     "type": "runCommand",
     "command": "cd loom-engine && cargo check 2>&1",
     "timeout": 120
-  }
+  },
+  "workspaceFolderName": "project-loom",
+  "shortName": "rust-build-verify"
 }

@@ -1,4 +1,5 @@
 ---
+description: High-level workspace context covering Project Loom architecture, tech stack, and repository layout
 inclusion: auto
 ---
 

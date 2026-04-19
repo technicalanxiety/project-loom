@@ -37,6 +37,8 @@ async fn main() {
                     database_url: String::new(),
                     database_url_online: None,
                     database_url_offline: None,
+                    online_pool_max: 10,
+                    offline_pool_max: 5,
                     loom_host: "0.0.0.0".to_string(),
                     loom_port: 8080,
                     loom_bearer_token: String::new(),

@@ -62,8 +62,10 @@ services:
     environment:
       # Explicit Docker-internal hostnames override any .env values
       DATABASE_URL: "postgres://loom:loom@postgres:5432/loom"
-      DATABASE_URL_ONLINE: "postgres://loom:loom@postgres:5432/loom?pool_size=10"
-      DATABASE_URL_OFFLINE: "postgres://loom:loom@postgres:5432/loom?pool_size=5"
+      DATABASE_URL_ONLINE: "postgres://loom:loom@postgres:5432/loom"
+      DATABASE_URL_OFFLINE: "postgres://loom:loom@postgres:5432/loom"
+      ONLINE_POOL_MAX: "10"
+      OFFLINE_POOL_MAX: "5"
       OLLAMA_URL: "http://ollama:11434"
       LOOM_HOST: "0.0.0.0"
       LOOM_PORT: "8080"

@@ -1,20 +1,35 @@
-localhost:443 {
-	# MCP endpoints → loom-engine
+# Caddyfile — Caddy reverse proxy for Project Loom
+#
+# Caddy automatically provisions and renews TLS certificates via ACME
+# when a real domain is used. For local development, the localhost
+# address below triggers Caddy's built-in CA (self-signed).
+#
+# To use a real domain in production, replace "localhost" with the FQDN
+# (e.g., loom.example.com) and Caddy handles Let's Encrypt automatically.
+
+{
+	# Global options
+	# Uncomment the line below to use a custom ACME email for production TLS:
+	# email ops@example.com
+}
+
+localhost {
+	# ── MCP endpoints → loom-engine ──────────────────────────
 	handle /mcp/* {
 		reverse_proxy loom-engine:8080
 	}
 
-	# REST API → loom-engine
+	# ── REST API → loom-engine ───────────────────────────────
 	handle /api/* {
 		reverse_proxy loom-engine:8080
 	}
 
-	# Dashboard API → loom-engine
+	# ── Dashboard API → loom-engine ──────────────────────────
 	handle /dashboard/api/* {
 		reverse_proxy loom-engine:8080
 	}
 
-	# Everything else → dashboard static files
+	# ── Dashboard static files (SPA fallback) ────────────────
 	handle {
 		root * /srv/dashboard
 		try_files {path} /index.html

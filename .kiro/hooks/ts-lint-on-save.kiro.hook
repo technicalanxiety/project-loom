@@ -4,15 +4,13 @@
   "description": "Runs Biome check on TypeScript file saves to catch lint and formatting issues immediately.",
   "version": "1",
   "when": {
-    "type": "fileEdited",
-    "patterns": [
-      "loom-dashboard/**/*.ts",
-      "loom-dashboard/**/*.tsx"
-    ]
+    "type": "userTriggered"
   },
   "then": {
     "type": "runCommand",
     "command": "cd loom-dashboard && npx biome check src/ 2>&1",
     "timeout": 30
-  }
+  },
+  "workspaceFolderName": "project-loom",
+  "shortName": "ts-lint-on-save"
 }

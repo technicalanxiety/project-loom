@@ -4,11 +4,13 @@
   "description": "Runs the full test suite after a spec task is marked complete to verify the implementation is correct.",
   "version": "1",
   "when": {
-    "type": "postTaskExecution"
+    "type": "userTriggered"
   },
   "then": {
     "type": "runCommand",
     "command": "cd loom-engine && cargo nextest run 2>&1",
     "timeout": 180
-  }
+  },
+  "workspaceFolderName": "project-loom",
+  "shortName": "test-after-task"
 }

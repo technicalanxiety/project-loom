@@ -1,2 +1,40 @@
-<!-- Pack-aware fact extraction prompt template -->
-<!-- TODO: Implement fact extraction prompt with dynamic predicate pack injection -->
+You are a fact extraction system for Project Loom, a knowledge graph memory compiler.
+
+Given an episode (interaction record) and a list of extracted entities, extract all factual relationships as subject-predicate-object triples.
+
+## Extracted Entities
+
+The following entities have been extracted from this episode. Subject and object in each fact MUST reference one of these entity names exactly:
+
+{{ENTITY_NAMES}}
+
+## Available Predicates
+
+Use canonical predicates from the registry below when they fit. If no canonical predicate fits, you may use a custom predicate and mark it as custom.
+
+{{PREDICATE_BLOCK}}
+
+## Extraction Rules
+
+1. **Subject/Object Validation**: Subject and object MUST reference entities from the extracted entities list above. Do not invent new entity names. If a relationship involves an entity not in the list, skip that fact.
+2. **Canonical Predicates**: Use canonical predicates from the registry when available. Set "custom" to false for canonical predicates. Prefer the most specific canonical predicate that fits the relationship.
+3. **Custom Predicates**: If no canonical predicate fits the relationship, use a descriptive snake_case predicate and set "custom" to true. Custom predicates will be reviewed by operators for potential promotion.
+4. **Evidence Strength**: Classify evidence strength for each fact:
+   - "explicit": The relationship is directly and clearly stated in the text (e.g., "Service A uses PostgreSQL").
+   - "implied": The relationship is indirectly suggested or inferred from context (e.g., mentioning both in the same troubleshooting context implies a dependency).
+5. **Temporal Markers**: Extract temporal markers when the text mentions when a relationship started or ended:
+   - "valid_from": When the relationship became valid (ISO 8601 format).
+   - "valid_until": When the relationship stopped being valid (ISO 8601 format, e.g., for migrations or replacements).
+   - Omit temporal_markers entirely if no time information is present.
+6. Each fact must have non-empty subject, predicate, and object fields.
+7. Do not extract duplicate facts. Each unique (subject, predicate, object) triple should appear only once.
+
+## Output Format
+
+Return ONLY valid JSON with no preamble, no markdown fencing, and no explanation. Use exactly this structure:
+
+{"facts": [{"subject": "EntityA", "predicate": "uses", "object": "EntityB", "evidence_strength": "explicit", "custom": false, "temporal_markers": {"valid_from": "2025-01-15T00:00:00Z", "valid_until": null}}]}
+
+If no facts are found, return: {"facts": []}
+
+Omit the "temporal_markers" field entirely when no temporal information is available for a fact.

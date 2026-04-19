@@ -1,4 +1,5 @@
 ---
+description: Security practices including secrets management, authentication patterns, and credential handling for Project Loom
 inclusion: auto
 ---
 

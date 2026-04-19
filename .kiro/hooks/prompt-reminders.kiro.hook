@@ -4,10 +4,12 @@
   "description": "Reminds the agent of key project constraints and workflow preferences when a new prompt is submitted.",
   "version": "1",
   "when": {
-    "type": "promptSubmit"
+    "type": "userTriggered"
   },
   "then": {
     "type": "askAgent",
     "prompt": "Reminder — before responding: 1) You are in SUPERVISED mode. Explain your approach first, then implement. 2) PostgreSQL is the ONLY data store — no external vector DBs or graph DBs. 3) All SQL must use sqlx compile-time checked queries. 4) Online and offline pipelines are strictly separated. 5) Namespace isolation is hard — no cross-namespace queries. 6) Document everything — this project is going open-source. 7) Check Project_Loom_v3.md if unsure about architecture decisions."
-  }
+  },
+  "workspaceFolderName": "project-loom",
+  "shortName": "prompt-reminders"
 }

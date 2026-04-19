@@ -4,13 +4,12 @@
   "description": "Reviews write operations against project coding standards before they are applied. Checks for documentation, error handling, and style compliance.",
   "version": "1",
   "when": {
-    "type": "preToolUse",
-    "toolTypes": [
-      "write"
-    ]
+    "type": "userTriggered"
   },
   "then": {
     "type": "askAgent",
     "prompt": "Before applying this write, verify: 1) All public items have doc comments (/// for Rust, /** */ for TS). 2) No unwrap() in non-test Rust code. 3) Error handling uses Result/Option patterns, not silent swallowing. 4) Functional style preferred — no unnecessary mutation. 5) Code is readable by a stranger (open-source ready). If any violations exist, fix them in the write. Do NOT block the write — just improve it."
-  }
+  },
+  "workspaceFolderName": "project-loom",
+  "shortName": "code-review-writes"
 }

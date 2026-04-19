@@ -1,4 +1,5 @@
 ---
+description: Testing tools, commands, patterns, and conventions for both Rust (loom-engine) and TypeScript (loom-dashboard)
 inclusion: auto
 ---
 
