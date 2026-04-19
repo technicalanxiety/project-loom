@@ -692,7 +692,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
   - Ensure all tests pass, ask the user if questions arise
   - _Requirements: 7.2, 14.1, 15.1, 18.1, 44.6, 44.7_
 
-- [ ] 15. MCP interface implementation
+- [x] 15. MCP interface implementation
   - [x] 15.1 Implement loom_learn MCP endpoint
     - Create `src/api/mcp.rs` with axum JSON-RPC handler
     - Accept content, source, namespace, occurred_at, metadata, participants via serde deserialization
@@ -704,7 +704,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Return immediately without blocking on extraction
     - _Requirements: 17.1, 17.4, 17.7, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-  - [~] 15.2 Implement loom_think MCP endpoint
+  - [x] 15.2 Implement loom_think MCP endpoint
     - Accept query, namespace, task_class_override, target_model via serde
     - Start latency tracking via tracing spans
     - Classify intent (or use override) via online pipeline
@@ -717,7 +717,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Return context package with token count and compilation_id
     - _Requirements: 17.2, 17.5, 8.1, 9.1, 10.1, 16.1, 18.1_
 
-  - [~] 15.3 Implement loom_recall MCP endpoint
+  - [x] 15.3 Implement loom_recall MCP endpoint
     - Accept entity_names, namespace, include_historical via serde
     - Query facts by entity names (subject or object) via sqlx
     - Filter to current facts (valid_until IS NULL) unless include_historical=true
@@ -725,36 +725,36 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Bypass intent classification and retrieval profiles
     - _Requirements: 17.3, 17.6_
 
-  - [~] 15.4 Implement bearer token authentication middleware
+  - [x] 15.4 Implement bearer token authentication middleware
     - Create `src/api/auth.rs` with tower middleware for bearer token validation
     - Apply to all MCP, REST, and Dashboard API endpoints
     - Token configured via environment variable
     - Return 401 Unauthorized on missing or invalid token
     - _Requirements: 45.2, 45.3, 45.4_
 
-  - [~] 15.5 Write property test for episode idempotency
+  - [x] 15.5 Write property test for episode idempotency
     - **Property 1: Episode Idempotency**
     - **Validates: Requirements 1.2**
     - Test that duplicate submissions return same episode_id with status "duplicate"
     - Use proptest with 100 iterations
 
-  - [~] 15.6 Write property test for episode field completeness
+  - [x] 15.6 Write property test for episode field completeness
     - **Property 2: Episode Field Completeness**
     - **Validates: Requirements 1.1, 1.3, 1.4, 1.5, 31.1, 31.2, 31.7**
     - Test that all required fields are stored correctly
 
-  - [~] 15.7 Write property test for content hash correctness
+  - [x] 15.7 Write property test for content hash correctness
     - **Property 3: Content Hash Correctness**
     - **Validates: Requirements 1.3**
     - Test that stored content_hash equals SHA-256 digest of content via sha2 crate
 
-  - [~] 15.8 Write property test for connection pool separation
+  - [x] 15.8 Write property test for connection pool separation
     - **Property 34: Connection Pool Separation**
     - **Validates: Requirements 44.7**
     - Test that online pipeline queries use dedicated online pool
     - Test that offline pipeline tasks use separate offline pool
 
-  - [~] 15.9 Write unit tests for MCP endpoints
+  - [x] 15.9 Write unit tests for MCP endpoints
     - Test loom_learn with various source types (manual, claude-code, github)
     - Test loom_think with different task classes and namespaces
     - Test loom_recall with and without historical flag
@@ -763,14 +763,14 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6_
 
 
-- [ ] 16. REST API and dashboard API endpoints
-  - [~] 16.1 Implement REST API endpoints
+- [x] 16. REST API and dashboard API endpoints
+  - [x] 16.1 Implement REST API endpoints
     - Create `src/api/rest.rs` with axum handlers
     - POST /api/learn: manual episode submission (same logic as loom_learn with source='manual')
     - GET /api/health: health check returning database and Ollama connectivity status
     - _Requirements: 37.1, 37.2, 37.3, 37.4, 37.5, 37.6_
 
-  - [~] 16.2 Implement dashboard API read-only endpoints
+  - [x] 16.2 Implement dashboard API read-only endpoints
     - Create `src/api/dashboard.rs` with axum handlers
     - GET /dashboard/api/health: pipeline health overview (episode counts by source/namespace, entity counts by type, fact counts current vs superseded, queue depth, model config)
     - GET /dashboard/api/namespaces: namespace listing for navigation
@@ -791,18 +791,18 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - GET /dashboard/api/metrics/hot-tier: hot-tier utilization per namespace
     - _Requirements: 49.1, 49.2, 49.3, 49.4, 49.5, 49.6, 49.7, 49.8, 49.9, 50.1, 50.2, 50.5_
 
-  - [~] 16.3 Implement dashboard API write endpoints (only 2)
+  - [x] 16.3 Implement dashboard API write endpoints (only 2)
     - POST /dashboard/api/conflicts/:id/resolve: resolve entity conflict (merge, keep_separate, split)
     - POST /dashboard/api/predicates/candidates/:id/resolve: resolve predicate candidate (map to existing canonical, or promote to canonical with target_pack selection)
     - _Requirements: 23.4, 23.5, 5.5, 5.6, 5.7, 50.3, 50.4_
 
-  - [~] 16.4 Write property test for dashboard API read-only enforcement
+  - [x] 16.4 Write property test for dashboard API read-only enforcement
     - **Property 32: Dashboard API Read-Only Enforcement**
     - **Validates: Requirements 50.2, 50.3**
     - Test that GET endpoints do not modify database state
     - Test that only conflict resolution and predicate candidate resolution POSTs perform writes
 
-  - [~] 16.5 Write unit tests for REST and dashboard API
+  - [x] 16.5 Write unit tests for REST and dashboard API
     - Test manual ingestion via POST /api/learn
     - Test health check endpoint
     - Test dashboard read-only endpoints return correct data shapes

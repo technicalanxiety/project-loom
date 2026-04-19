@@ -1,4 +1,4 @@
-use axum::{routing::get, Router};
+use axum::{middleware, routing::{get, post}, Router};
 use std::net::SocketAddr;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -10,9 +10,14 @@ mod pipeline;
 mod types;
 mod worker;
 
+use api::auth::require_bearer_token;
+use api::dashboard;
+use api::mcp::{handle_loom_learn, handle_loom_recall, handle_loom_think, AppState};
+use api::rest::{handle_api_learn, handle_health};
+
 #[tokio::main]
 async fn main() {
-    // Load .env before tracing init so RUST_LOG is available
+    // Load .env before tracing init so RUST_LOG is available.
     dotenvy::dotenv().ok();
 
     tracing_subscriber::registry()
@@ -23,47 +28,112 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let _config = match config::AppConfig::from_env() {
+    let config = match config::AppConfig::from_env() {
         Ok(cfg) => {
             tracing::info!(host = %cfg.loom_host, port = cfg.loom_port, "configuration loaded");
             cfg
         }
         Err(e) => {
-            tracing::warn!("config not fully loaded (ok during scaffolding): {e}");
-            // During scaffolding, allow startup without full config
-            config::AppConfig::from_env().unwrap_or_else(|_| {
-                // Provide minimal defaults for scaffolding phase
-                config::AppConfig {
-                    database_url: String::new(),
-                    database_url_online: None,
-                    database_url_offline: None,
-                    online_pool_max: 10,
-                    offline_pool_max: 5,
-                    loom_host: "0.0.0.0".to_string(),
-                    loom_port: 8080,
-                    loom_bearer_token: String::new(),
-                    llm: config::LlmConfig {
-                        ollama_url: String::new(),
-                        extraction_model: String::new(),
-                        classification_model: String::new(),
-                        embedding_model: String::new(),
-                        azure_openai_url: None,
-                        azure_openai_key: None,
-                    },
-                }
-            })
+            tracing::error!("failed to load configuration: {e}");
+            std::process::exit(1);
         }
     };
 
-    let app = Router::new().route("/api/health", get(health_check));
+    // Initialize database pools and run migrations.
+    let pools = match db::pool::DbPools::init(&config).await {
+        Ok(p) => {
+            tracing::info!("database pools initialized");
+            p
+        }
+        Err(e) => {
+            tracing::error!("failed to initialize database pools: {e}");
+            std::process::exit(1);
+        }
+    };
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], _config.loom_port));
+    if let Err(e) = pools.run_migrations().await {
+        tracing::error!("failed to run migrations: {e}");
+        std::process::exit(1);
+    }
+
+    // Build LLM client.
+    let llm_client = match llm::client::LlmClient::new(&config.llm) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("failed to build LLM client: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let bearer_token = config.loom_bearer_token.clone();
+
+    let state = AppState {
+        pools,
+        llm_client,
+        config,
+    };
+
+    // MCP routes — all protected by bearer token middleware.
+    let mcp_routes = Router::new()
+        .route("/mcp/loom_learn", post(handle_loom_learn))
+        .route("/mcp/loom_think", post(handle_loom_think))
+        .route("/mcp/loom_recall", post(handle_loom_recall))
+        .layer(middleware::from_fn_with_state(
+            bearer_token.clone(),
+            require_bearer_token,
+        ))
+        .with_state(state.clone());
+
+    // REST /api/learn — protected by bearer token middleware.
+    let rest_learn_route = Router::new()
+        .route("/api/learn", post(handle_api_learn))
+        .layer(middleware::from_fn_with_state(
+            bearer_token.clone(),
+            require_bearer_token,
+        ))
+        .with_state(state.clone());
+
+    // Unauthenticated routes — health check and legacy stub.
+    let public_routes = Router::new()
+        .route("/api/health", get(handle_health))
+        .with_state(state.clone());
+
+    // Dashboard routes — all protected by bearer token middleware.
+    let dashboard_routes = Router::new()
+        .route("/dashboard/api/health", get(dashboard::handle_dashboard_health))
+        .route("/dashboard/api/namespaces", get(dashboard::handle_namespaces))
+        .route("/dashboard/api/compilations", get(dashboard::handle_compilations))
+        .route("/dashboard/api/compilations/:id", get(dashboard::handle_compilation_detail))
+        .route("/dashboard/api/entities", get(dashboard::handle_entities))
+        .route("/dashboard/api/entities/:id", get(dashboard::handle_entity_detail))
+        .route("/dashboard/api/entities/:id/graph", get(dashboard::handle_entity_graph))
+        .route("/dashboard/api/facts", get(dashboard::handle_facts))
+        .route("/dashboard/api/conflicts", get(dashboard::handle_conflicts))
+        .route("/dashboard/api/predicates/candidates", get(dashboard::handle_predicate_candidates))
+        .route("/dashboard/api/predicates/packs", get(dashboard::handle_predicate_packs))
+        .route("/dashboard/api/predicates/packs/:pack", get(dashboard::handle_pack_detail))
+        .route("/dashboard/api/predicates/active/:namespace", get(dashboard::handle_active_predicates))
+        .route("/dashboard/api/metrics/retrieval", get(dashboard::handle_metrics_retrieval))
+        .route("/dashboard/api/metrics/extraction", get(dashboard::handle_metrics_extraction))
+        .route("/dashboard/api/metrics/classification", get(dashboard::handle_metrics_classification))
+        .route("/dashboard/api/metrics/hot-tier", get(dashboard::handle_metrics_hot_tier))
+        .route("/dashboard/api/conflicts/:id/resolve", post(dashboard::handle_resolve_conflict))
+        .route("/dashboard/api/predicates/candidates/:id/resolve", post(dashboard::handle_resolve_predicate_candidate))
+        .layer(middleware::from_fn_with_state(
+            bearer_token.clone(),
+            require_bearer_token,
+        ))
+        .with_state(state.clone());
+
+    let app = Router::new()
+        .merge(mcp_routes)
+        .merge(rest_learn_route)
+        .merge(public_routes)
+        .merge(dashboard_routes);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], state.config.loom_port));
     tracing::info!("loom-engine listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
-}
-
-async fn health_check() -> &'static str {
-    "ok"
 }
