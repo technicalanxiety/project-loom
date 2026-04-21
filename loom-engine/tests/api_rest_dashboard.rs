@@ -67,7 +67,7 @@ async fn build_test_app() -> Router {
         loom_bearer_token: TEST_BEARER_TOKEN.to_string(),
         llm: LlmConfig {
             ollama_url: "http://localhost:11434".to_string(),
-            extraction_model: "gemma4:26b-a4b-q4".to_string(),
+            extraction_model: "gemma4:26b".to_string(),
             classification_model: "gemma4:e4b".to_string(),
             embedding_model: "nomic-embed-text".to_string(),
             azure_openai_url: None,

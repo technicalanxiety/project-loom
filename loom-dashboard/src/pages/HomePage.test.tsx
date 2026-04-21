@@ -28,7 +28,7 @@ const mockHealth: PipelineHealthResponse = {
   facts_current: 120,
   facts_superseded: 5,
   queue_depth: 3,
-  extraction_model: 'gemma4:26b-a4b-q4',
+  extraction_model: 'gemma4:26b',
   classification_model: 'gemma4:e4b',
 };
 
@@ -48,7 +48,7 @@ describe('HomePage', () => {
 
     expect(screen.getByText('5')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('gemma4:26b-a4b-q4')).toBeInTheDocument();
+    expect(screen.getByText('gemma4:26b')).toBeInTheDocument();
     expect(screen.getByText('gemma4:e4b')).toBeInTheDocument();
     expect(screen.getByText('claude-code')).toBeInTheDocument();
     expect(screen.getByText('42')).toBeInTheDocument();

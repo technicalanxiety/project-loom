@@ -53,13 +53,13 @@ Ranking coefficient: **0.8**. Authoritative but unverified against live observat
 
 ### Mode 2 — Vendor export import (`vendor_import`)
 
-Parsed content from vendor exports: Claude.ai account export, Claude Code JSONL, ChatGPT export, Codex CLI rollouts. Ingested via `bootstrap/*.py` scripts that POST to `/api/learn` with `ingestion_mode = vendor_import` plus `parser_version` and `parser_source_schema` metadata. Each parser asserts a pinned schema and fails loud on drift — no partial ingestion, no best-effort fallback.
+Parsed content from vendor exports. Current parsers under `bootstrap/`: Claude Code local JSONL (`claude_code_parser.py`), Claude.ai / Claude Desktop account export (`claude_ai_parser.py`), ChatGPT Data Controls export (`chatgpt_parser.py`), and Microsoft 365 Copilot Purview audit export (`m365_copilot_parser.py`). A stub exists at `github_copilot_parser.py` for GitHub Copilot Chat, which has no published export at time of writing. Each parser POSTs to `/api/learn` with `ingestion_mode = vendor_import` plus `parser_version` and `parser_source_schema` metadata, asserts a pinned schema, and fails loud on drift — no partial ingestion, no best-effort fallback.
 
 Ranking coefficient: **0.6**. Acknowledged as potentially incomplete per export fidelity.
 
 ### Mode 3 — Live MCP capture (`live_mcp_capture`)
 
-Real-time verbatim capture via MCP-aware clients. The `loom_learn` tool forces `ingestion_mode = live_mcp_capture` at the MCP server boundary — clients do not get to set or override this field. Exhaustive capture is additionally possible via the `templates/loom-capture.sh` PostSession hook for Claude Code, which posts raw session JSONL directly to `/api/learn` with the same mode.
+Real-time verbatim capture via MCP-aware clients. The `loom_learn` tool forces `ingestion_mode = live_mcp_capture` at the MCP server boundary — clients do not get to set or override this field. Currently the first-class MCP clients are Claude Code, Claude Desktop, ChatGPT Desktop (Developer Mode apps on Business / Enterprise / Edu), GitHub Copilot (VS Code Agent mode via `.vscode/mcp.json`), and M365 Copilot (declarative agents via Copilot Studio). Exhaustive capture is additionally possible on clients that expose session-lifecycle hooks — at time of writing only Claude Code, via the `templates/loom-capture.sh` PostSession hook that posts raw session JSONL directly to `/api/learn` with the same mode. Per-client wiring lives in `docs/clients/`.
 
 Ranking coefficient: **1.0**. Ground truth; one live-captured source episode is sufficient for a fact to rank at full provenance.
 
@@ -70,10 +70,11 @@ Capture fidelity varies by surface. This is a property of the client, not of Loo
 | Surface | Fidelity | Mechanism |
 |---|---|---|
 | Claude Code | Exhaustive | PostSession hook reads raw JSONL from `~/.claude/projects/`, posts full transcript |
-| Claude Desktop | Selective | MCP `loom_learn` with verbatim user-pointed content |
-| Codex CLI | Exhaustive | Session rollout file watcher (same pattern as Claude Code) |
-| ChatGPT Desktop | Selective | MCP `loom_learn` (when/if MCP is supported) |
-| Claude.ai web, mobile | None | Mode 1 and Mode 2 only |
+| Claude Desktop | Selective | MCP `loom_learn` with verbatim user-pointed content; Mode 2 via Claude.ai account export for history backfill |
+| ChatGPT Desktop | Selective | MCP `loom_learn` via Developer Mode apps (Business / Enterprise / Edu); Mode 2 via Data Controls export for history backfill |
+| GitHub Copilot (VS Code) | Selective | MCP `loom_learn` via `.vscode/mcp.json` + Agent mode; no Mode 2 — GitHub publishes no Copilot Chat export |
+| M365 Copilot | Selective | MCP `loom_learn` via Copilot Studio declarative agent; Mode 2 via Purview audit export for history backfill |
+| Claude.ai web, mobile | None | Mode 2 only via account export |
 
 Exhaustive capture means every session is ingested in full, automatically, without model judgment about what matters. Selective capture means the user explicitly points at content and the model invokes `loom_learn` with the verbatim text. Both are legitimate Mode 3 capture with different guarantees. See `docs/adr/004-ingestion-modes.md` for the full rationale.
 
@@ -88,10 +89,18 @@ There is no `llm_reconstruction` mode. That path is rejected architecturally. It
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
+    subgraph "MCP Clients — live_mcp_capture"
         CC[Claude Code]
-        Manual[Manual Ingestion]
-        GH[GitHub Webhooks]
+        CD[Claude Desktop]
+        CGPT[ChatGPT Desktop]
+        GHC[GitHub Copilot]
+        M365[M365 Copilot]
+    end
+
+    subgraph "Other Ingestion"
+        Boot[Bootstrap parsers<br/>vendor_import]
+        Seed[loom-seed CLI<br/>user_authored_seed]
+        GH[GitHub Webhooks<br/>live_mcp_capture]
     end
 
     subgraph "Caddy Reverse Proxy"
@@ -135,7 +144,7 @@ graph TB
     end
 
     subgraph "Ollama Container"
-        Gemma26B[gemma4:26b-a4b-q4<br/>Extraction]
+        Gemma26B[gemma4:26b<br/>Extraction]
         Gemma4B[gemma4:e4b<br/>Classification]
         Nomic[nomic-embed-text<br/>Embeddings 768d]
     end
@@ -216,7 +225,7 @@ The system deploys as five Docker containers orchestrated via Docker Compose:
    - Exposed on port 5432 (internal network only)
 
 4. **ollama** (Local LLM inference)
-   - gemma4:26b-a4b-q4 for entity and fact extraction
+   - gemma4:26b for entity and fact extraction
    - gemma4:e4b for intent classification
    - nomic-embed-text for 768-dimension embeddings
    - Zero cloud dependency for inference
@@ -364,7 +373,7 @@ The `llm/client.rs` module provides an HTTP client (reqwest) for Ollama with Azu
 
 **Ollama Integration (Primary)**
 - Uses OpenAI-compatible API format (`/v1/chat/completions`, `/v1/embeddings`)
-- Gemma 4 26B MoE (gemma4:26b-a4b-q4) for entity and fact extraction
+- Gemma 4 26B MoE (gemma4:26b) for entity and fact extraction
 - Gemma 4 E4B (gemma4:e4b) for intent classification
 - nomic-embed-text for 768-dimension embeddings
 - Model endpoints configured via environment variables
@@ -728,7 +737,7 @@ The schema separates canonical data (immutable truth) from derived serving state
 CREATE TABLE loom_episodes (
   -- CANONICAL
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  source          TEXT NOT NULL,                    -- claude-code, manual, github
+  source          TEXT NOT NULL,                    -- free-form; e.g. claude-code, claude-desktop, chatgpt, github-copilot, m365-copilot, manual, github
   source_id       TEXT,
   source_event_id TEXT,
   content         TEXT NOT NULL,
@@ -739,7 +748,7 @@ CREATE TABLE loom_episodes (
   metadata        JSONB DEFAULT '{}',
   participants    TEXT[],
   -- EXTRACTION LINEAGE
-  extraction_model TEXT,                            -- e.g. "gemma4:26b-a4b-q4", "gpt-4.1-mini"
+  extraction_model TEXT,                            -- e.g. "gemma4:26b", "gpt-4.1-mini"
   classification_model TEXT,                        -- e.g. "gemma4:e4b"
   extraction_metrics JSONB,                         -- ExtractionMetrics struct serialized per ingestion
   -- DERIVED (recomputable)
@@ -1422,7 +1431,7 @@ $$ LANGUAGE sql STABLE;
 The system requires both unit testing and property-based testing for comprehensive coverage:
 
 **Unit Tests**: Verify specific examples, edge cases, error conditions, and integration points
-- Specific episode ingestion scenarios (manual, claude-code, github sources)
+- Specific episode ingestion scenarios across every supported source identifier (manual, github, and per-client: claude-code, claude-desktop, chatgpt, github-copilot, m365-copilot)
 - Entity resolution edge cases (empty aliases, special characters, very long names)
 - Fact supersession scenarios (multiple supersessions, circular references)
 - Error handling paths (Ollama failures, constraint violations, timeouts)

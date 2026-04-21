@@ -28,7 +28,7 @@ fn learn_status() -> impl Strategy<Value = String> {
 /// Strategy for generating a model name string.
 fn model_name() -> impl Strategy<Value = String> {
     prop::sample::select(&[
-        "gemma4:26b-a4b-q4",
+        "gemma4:26b",
         "gemma4:e4b",
         "gpt-4.1-mini",
         "test-model",

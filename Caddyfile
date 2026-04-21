@@ -15,9 +15,10 @@
 
 localhost {
 	# ── MCP endpoints → loom-engine ──────────────────────────
-	# External clients (Claude Code, Claude Desktop, etc.) must supply
-	# their own `Authorization: Bearer <token>` header. Caddy does not
-	# inject one here.
+	# External MCP clients (Claude Code, Claude Desktop, ChatGPT Desktop,
+	# GitHub Copilot, M365 Copilot, etc.) must supply their own
+	# `Authorization: Bearer <token>` header. Caddy does not inject one
+	# here.
 	handle /mcp/* {
 		reverse_proxy loom-engine:8080
 	}

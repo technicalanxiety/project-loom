@@ -1,13 +1,13 @@
 -- 001_episodes.sql
 -- Episodes: Immutable evidence layer.
--- Each episode represents a raw interaction record from a source system (claude-code, manual, github).
+-- Each episode represents a raw interaction record from a source system (e.g. claude-code, claude-desktop, chatgpt, github-copilot, m365-copilot, manual, github).
 -- Episodes are the foundational evidence that all extracted knowledge traces back to.
 -- Canonical columns are the source of truth; derived columns (embedding, tags, processed) are recomputable.
 
 CREATE TABLE loom_episodes (
   -- CANONICAL: Source of truth, never recomputed
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  source          TEXT NOT NULL,                    -- e.g. claude-code, manual, github
+  source          TEXT NOT NULL,                    -- free-form; e.g. claude-code, claude-desktop, chatgpt, github-copilot, m365-copilot, manual, github
   source_id       TEXT,                             -- external system identifier
   source_event_id TEXT,                             -- dedup key within source
   content         TEXT NOT NULL,                    -- raw episode text
@@ -19,7 +19,7 @@ CREATE TABLE loom_episodes (
   participants    TEXT[],                           -- people involved in the interaction
 
   -- EXTRACTION LINEAGE: Tracks which models processed this episode
-  extraction_model     TEXT,                        -- e.g. "gemma4:26b-a4b-q4", "gpt-4.1-mini"
+  extraction_model     TEXT,                        -- e.g. "gemma4:26b", "gpt-4.1-mini"
   classification_model TEXT,                        -- e.g. "gemma4:e4b"
   extraction_metrics   JSONB,                       -- ExtractionMetrics struct serialized per ingestion
 

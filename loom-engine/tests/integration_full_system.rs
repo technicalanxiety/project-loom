@@ -88,7 +88,7 @@ fn test_config() -> AppConfig {
         loom_bearer_token: TEST_BEARER_TOKEN.to_string(),
         llm: LlmConfig {
             ollama_url: "http://localhost:11434".to_string(),
-            extraction_model: "gemma4:26b-a4b-q4".to_string(),
+            extraction_model: "gemma4:26b".to_string(),
             classification_model: "gemma4:e4b".to_string(),
             embedding_model: "nomic-embed-text".to_string(),
             azure_openai_url: None,
@@ -389,14 +389,14 @@ mod offline_pipeline {
                 "implied": 2
             },
             "processing_time_ms": 1250,
-            "extraction_model": "gemma4:26b-a4b-q4"
+            "extraction_model": "gemma4:26b"
         });
 
         // Verify it round-trips through serde.
         let json_str = serde_json::to_string(&metrics).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed["entity_counts"]["exact"], 3);
-        assert_eq!(parsed["extraction_model"], "gemma4:26b-a4b-q4");
+        assert_eq!(parsed["extraction_model"], "gemma4:26b");
     }
 
     /// Entity type validation rejects unknown types via serde.
@@ -650,7 +650,7 @@ mod online_pipeline {
         let input = CompilationInput {
             namespace: "test-ns".to_string(),
             task_class: TaskClass::Chat,
-            target_model: "gemma4:26b-a4b-q4".to_string(),
+            target_model: "gemma4:26b".to_string(),
             format: OutputFormat::Compact,
             warm_tier_budget: 3000,
             hot_tier_items: vec![],
@@ -1382,7 +1382,7 @@ mod extraction_metrics {
                 "implied": 2
             },
             "processing_time_ms": 1250,
-            "extraction_model": "gemma4:26b-a4b-q4"
+            "extraction_model": "gemma4:26b"
         });
 
         // Verify all required fields are present.
@@ -1472,7 +1472,7 @@ mod connection_pool_separation {
             loom_bearer_token: "test".to_string(),
             llm: LlmConfig {
                 ollama_url: "http://ollama:11434".to_string(),
-                extraction_model: "gemma4:26b-a4b-q4".to_string(),
+                extraction_model: "gemma4:26b".to_string(),
                 classification_model: "gemma4:e4b".to_string(),
                 embedding_model: "nomic-embed-text".to_string(),
                 azure_openai_url: None,
@@ -1538,7 +1538,7 @@ mod connection_pool_separation {
             loom_bearer_token: "test".to_string(),
             llm: LlmConfig {
                 ollama_url: "http://ollama:11434".to_string(),
-                extraction_model: "gemma4:26b-a4b-q4".to_string(),
+                extraction_model: "gemma4:26b".to_string(),
                 classification_model: "gemma4:e4b".to_string(),
                 embedding_model: "nomic-embed-text".to_string(),
                 azure_openai_url: None,
@@ -1794,7 +1794,7 @@ mod cross_cutting {
             );
         }
 
-        let non_claude = ["gpt-4.1-mini", "gemma4:26b-a4b-q4", "llama-3"];
+        let non_claude = ["gpt-4.1-mini", "gemma4:26b", "llama-3"];
         for model in &non_claude {
             let format = if model.to_lowercase().contains("claude") {
                 OutputFormat::Structured

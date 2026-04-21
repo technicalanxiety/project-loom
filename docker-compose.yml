@@ -21,7 +21,7 @@ services:
 
   # ─── Ollama (Local LLM Inference) ─────────────────────────
   # After first start, pull the required models:
-  #   docker compose exec ollama ollama pull gemma4:26b-a4b-q4
+  #   docker compose exec ollama ollama pull gemma4:26b
   #   docker compose exec ollama ollama pull gemma4:e4b
   #   docker compose exec ollama ollama pull nomic-embed-text
   ollama:

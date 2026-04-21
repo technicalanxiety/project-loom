@@ -607,7 +607,7 @@ mod tests {
                 custom_count: 1,
             }),
             superseded_count: 0,
-            model: "gemma4:26b-a4b-q4".to_string(),
+            model: "gemma4:26b".to_string(),
             valid_extracted_facts: vec![],
         };
 
@@ -623,7 +623,7 @@ mod tests {
             Some(&fact_result),
             &evidence,
             750,
-            "gemma4:26b-a4b-q4",
+            "gemma4:26b",
         );
 
         // Serialize to JSONB-compatible serde_json::Value.
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(json["explicit"], 2);
         assert_eq!(json["implied"], 1);
         assert_eq!(json["processing_time_ms"], 750);
-        assert_eq!(json["extraction_model"], "gemma4:26b-a4b-q4");
+        assert_eq!(json["extraction_model"], "gemma4:26b");
     }
 
     #[test]
@@ -703,7 +703,7 @@ mod tests {
             None,
             &[Some("explicit".to_string())],
             200,
-            "gemma4:26b-a4b-q4",
+            "gemma4:26b",
         );
 
         // Serialize → deserialize round trip.

@@ -23,6 +23,7 @@ The `llm_reconstruction` mode does not exist. LLM summaries of past conversation
 ## Table of Contents
 
 - [Architecture](#architecture)
+- [Supported Clients](#supported-clients)
 - [Technology Stack](#technology-stack)
 - [Key Features](#key-features)
 - [Prerequisites](#prerequisites)
@@ -45,10 +46,18 @@ Loom runs as five Docker containers orchestrated via Docker Compose:
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
+    subgraph "MCP Clients — live_mcp_capture"
         CC[Claude Code]
-        Manual[Manual Ingestion]
-        GH[GitHub Webhooks]
+        CD[Claude Desktop]
+        CGPT[ChatGPT Desktop]
+        GHC[GitHub Copilot]
+        M365[M365 Copilot]
+    end
+
+    subgraph "Other Ingestion"
+        Boot[Bootstrap parsers<br/>vendor_import]
+        Seed[loom-seed CLI<br/>user_authored_seed]
+        GH[GitHub Webhooks<br/>live_mcp_capture]
     end
 
     subgraph "Caddy Reverse Proxy :443"
@@ -83,7 +92,7 @@ graph TB
     end
 
     subgraph "Ollama"
-        Models[gemma4:26b-a4b-q4<br/>gemma4:e4b<br/>nomic-embed-text]
+        Models[gemma4:26b<br/>gemma4:e4b<br/>nomic-embed-text]
     end
 
     subgraph "PostgreSQL 17"
@@ -91,7 +100,12 @@ graph TB
     end
 
     CC --> Caddy
-    Manual --> Caddy
+    CD --> Caddy
+    CGPT --> Caddy
+    GHC --> Caddy
+    M365 --> Caddy
+    Boot --> Caddy
+    Seed --> Caddy
     GH --> Caddy
 
     Caddy -->|/mcp/*| MCP
@@ -138,6 +152,31 @@ The online and offline pipelines share PostgreSQL but use **separate connection 
 
 - **Online pipeline** (loom_think): classify → retrieve → weight → rank → compile. Target < 500ms p95.
 - **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately.
+
+## Supported Clients
+
+Loom is transport-agnostic. Any surface that can speak HTTP to `/mcp/*`
+or `/api/learn` can drive it. Five clients are first-class — each ships
+with an integration guide, a discipline template, and (where the client
+publishes an export) a bootstrap parser. All five get equal billing —
+there is no "primary" target.
+
+| Client | MCP live capture | Vendor import | Guide |
+|--------|------------------|---------------|-------|
+| Claude Code | Yes — HTTP transport + PostSession hook | Yes — local JSONL | [docs/clients/claude-code.md](docs/clients/claude-code.md) |
+| Claude Desktop | Yes — HTTP transport | Yes — Claude.ai export | [docs/clients/claude-desktop.md](docs/clients/claude-desktop.md) |
+| ChatGPT Desktop | Yes — Developer Mode apps (Business / Enterprise / Edu) | Yes — Data Controls export | [docs/clients/chatgpt-desktop.md](docs/clients/chatgpt-desktop.md) |
+| GitHub Copilot (VS Code) | Yes — `.vscode/mcp.json`, Agent mode | No — no Copilot Chat export published | [docs/clients/github-copilot.md](docs/clients/github-copilot.md) |
+| M365 Copilot | Yes — Copilot Studio declarative agent | Yes — Purview audit export | [docs/clients/m365-copilot.md](docs/clients/m365-copilot.md) |
+
+Every MCP transport converges on the same server handler, which
+hardcodes `ingestion_mode = live_mcp_capture` — clients cannot forge
+the mode through MCP. Vendor-import parsers explicitly set
+`vendor_import` and carry `parser_version` + `parser_source_schema`
+so the Stage 5 ranker can apply the correct provenance coefficient.
+
+See [docs/clients/README.md](docs/clients/README.md) for the per-client
+guide index and the checklist for wiring a new client.
 
 ## Technology Stack
 
@@ -203,7 +242,7 @@ This starts all five containers. PostgreSQL migrations run automatically on firs
 ```bash
 docker compose exec ollama ollama pull nomic-embed-text
 docker compose exec ollama ollama pull gemma4:e4b
-docker compose exec ollama ollama pull gemma4:26b-a4b-q4
+docker compose exec ollama ollama pull gemma4:26b
 ```
 
 > Pull `nomic-embed-text` first — it's small and needed for basic operation. The larger Gemma models can download in the background.
@@ -305,7 +344,7 @@ All configuration is via environment variables. Copy `.env.example` to `.env` an
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OLLAMA_URL` | Ollama API base URL | `http://ollama:11434` |
-| `EXTRACTION_MODEL` | Model for entity/fact extraction | `gemma4:26b-a4b-q4` |
+| `EXTRACTION_MODEL` | Model for entity/fact extraction | `gemma4:26b` |
 | `CLASSIFICATION_MODEL` | Model for intent classification | `gemma4:e4b` |
 | `EMBEDDING_MODEL` | Model for embeddings (768d) | `nomic-embed-text` |
 
@@ -360,7 +399,7 @@ Stores an episode and queues it for async extraction. Returns immediately.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `content` | string | yes | Raw episode text |
-| `source` | string | yes | Source system: `claude-code`, `manual`, `github` |
+| `source` | string | yes | Free-form source identifier (e.g. `claude-code`, `claude-desktop`, `chatgpt`, `github-copilot`, `m365-copilot`, `manual`, `github`) |
 | `namespace` | string | yes | Isolation boundary for this memory |
 | `occurred_at` | ISO 8601 | no | When the interaction happened (defaults to now) |
 | `metadata` | object | no | Arbitrary source-specific metadata |
@@ -483,7 +522,7 @@ Bypasses classification and retrieval profiles. Returns raw facts for named enti
 
 ### POST /api/learn — Direct Episode Ingestion
 
-General-purpose ingestion endpoint. Bootstrap scripts, the CLI seed tool, and the Claude Code PostSession hook all POST here. The caller specifies `ingestion_mode`; the server validates the enum and the parser-metadata coupling.
+General-purpose ingestion endpoint. Bootstrap parsers (per-client vendor exports), the `loom-seed` CLI, and live-capture hooks (like Claude Code's PostSession hook) all POST here. The caller specifies `ingestion_mode`; the server validates the enum and the parser-metadata coupling.
 
 ```bash
 curl -X POST https://localhost/api/learn \
@@ -693,7 +732,7 @@ npx biome check src/
 ```
 project-loom/
 ├── README.md                           # This file
-├── CLAUDE.md                           # Claude Code MCP integration guide
+├── CLAUDE.md                           # Project context auto-loaded by Claude Code sessions
 ├── CONTRIBUTING.md                     # Contribution guidelines
 ├── SECURITY.md                         # Security policy
 ├── CHANGELOG.md                        # Release history
@@ -778,10 +817,44 @@ project-loom/
 │       └── init-extensions.sql         # pgvector + pgAudit setup
 │
 ├── docs/
-│   └── adr/                            # Architecture Decision Records
-│       ├── 001-postgresql-single-store.md
-│       ├── 002-local-llm-inference.md
-│       └── 003-namespace-isolation.md
+│   ├── adr/                            # Architecture Decision Records
+│   │   ├── 001-postgresql-single-store.md
+│   │   ├── 002-local-llm-inference.md
+│   │   ├── 003-namespace-isolation.md
+│   │   ├── 004-ingestion-modes.md
+│   │   ├── 005-verbatim-content-invariant.md
+│   │   └── 006-dashboard-auth-injection.md
+│   └── clients/                        # Per-client integration guides
+│       ├── README.md                   # Index + new-client checklist
+│       ├── claude-code.md
+│       ├── claude-desktop.md
+│       ├── chatgpt-desktop.md
+│       ├── github-copilot.md
+│       └── m365-copilot.md
+│
+├── bootstrap/                          # Vendor-export parsers (Mode 2)
+│   ├── README.md
+│   ├── schema_assertions.py            # Shared strict-schema helper
+│   ├── claude_code_parser.py           # Reference implementation
+│   ├── claude_ai_parser.py             # Claude.ai / Claude Desktop export
+│   ├── chatgpt_parser.py               # ChatGPT Data Controls export
+│   ├── github_copilot_parser.py        # Stub — no export available
+│   └── m365_copilot_parser.py          # M365 Purview audit export
+│
+├── templates/                          # Client-side configs + discipline blocks
+│   ├── README.md
+│   ├── CLAUDE.md                       # Claude Code project CLAUDE.md block
+│   ├── loom-capture.sh                 # Claude Code PostSession hook
+│   ├── claude_desktop_config.example.json
+│   ├── claude_desktop_projects_instructions.md
+│   ├── chatgpt_custom_instructions.md
+│   ├── vscode_mcp.example.json
+│   ├── github_copilot_instructions.md
+│   ├── m365_copilot_agent_manifest.example.json
+│   └── m365_copilot_instructions.md
+│
+├── cli/
+│   └── loom-seed.py                    # Mode 1 user_authored_seed ingestion
 │
 └── .kiro/
     └── specs/                          # Spec-driven development

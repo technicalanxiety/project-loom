@@ -25,7 +25,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
   - [x] 1.2 Create Docker Compose configuration with five containers
     - Write `docker-compose.yml` with five services: loom-engine, loom-dashboard, postgres, ollama, caddy
     - Configure PostgreSQL 16 container with pgvector and pgAudit extensions, persistent volume, port 5432 (internal only)
-    - Configure Ollama container with GPU passthrough, model volume for gemma4:26b-a4b-q4, gemma4:e4b, nomic-embed-text
+    - Configure Ollama container with GPU passthrough, model volume for gemma4:26b, gemma4:e4b, nomic-embed-text
     - Configure Caddy container with Caddyfile for reverse proxy routing
     - Configure loom-engine container connecting to postgres and ollama via internal Docker network
     - Configure loom-dashboard container (Vite build output served by Caddy)
@@ -1082,7 +1082,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Verify sqlx migrations run on startup
     - Verify loom-engine serves MCP, REST, and Dashboard API on port 8080
     - Verify Caddy routes correctly (/api/*, /mcp/*, /dashboard/api/* → loom-engine; /* → dashboard static files)
-    - Verify Ollama models available (gemma4:26b-a4b-q4, gemma4:e4b, nomic-embed-text)
+    - Verify Ollama models available (gemma4:26b, gemma4:e4b, nomic-embed-text)
     - Verify dashboard SPA loads and communicates with API
     - Verify health checks pass for all containers
     - _Requirements: 45.1, 45.2, 45.3, 45.4, 45.5, 45.6, 45.7, 45.8, 45.9, 45.10, 45.11, 46.1, 46.2, 46.3, 46.4, 46.5, 51.1, 51.2, 51.3, 51.4, 51.5_

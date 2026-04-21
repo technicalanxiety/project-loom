@@ -20,7 +20,7 @@ Key considerations:
 
 Use Ollama for local LLM inference:
 
-- **Extraction**: Gemma 4 26B MoE (gemma4:26b-a4b-q4) — strong structured output.
+- **Extraction**: Gemma 4 26B MoE (gemma4:26b) — strong structured output.
 - **Classification**: Gemma 4 E4B (gemma4:e4b) — fast, lightweight.
 - **Embeddings**: nomic-embed-text — 768-dimension vectors, good quality/speed tradeoff.
 

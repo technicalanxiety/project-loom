@@ -761,21 +761,23 @@ pub async fn handle_dashboard_health(
     .fetch_one(pool)
     .await?;
 
-    // Most recent extraction model
+    // Most recent extraction model, falling back to configured model name
     let extraction_model: Option<String> = sqlx::query_scalar(
         "SELECT extraction_model FROM loom_episodes WHERE extraction_model IS NOT NULL ORDER BY ingested_at DESC LIMIT 1",
     )
     .fetch_optional(pool)
     .await?
-    .flatten();
+    .flatten()
+    .or_else(|| Some(state.config.llm.extraction_model.clone()));
 
-    // Most recent classification model
+    // Most recent classification model, falling back to configured model name
     let classification_model: Option<String> = sqlx::query_scalar(
         "SELECT classification_model FROM loom_episodes WHERE classification_model IS NOT NULL ORDER BY ingested_at DESC LIMIT 1",
     )
     .fetch_optional(pool)
     .await?
-    .flatten();
+    .flatten()
+    .or_else(|| Some(state.config.llm.classification_model.clone()));
 
     Ok(Json(PipelineHealthResponse {
         episodes_by_source: episodes_by_source

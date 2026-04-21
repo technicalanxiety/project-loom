@@ -33,7 +33,7 @@ Unacceptable sources include, but are not limited to: LLM summaries, LLM paraphr
 This invariant is **trust-based** and cannot be enforced at runtime. LLM-generated text is not reliably detectable, and any detection heuristic would produce false positives on legitimate content. Enforcement is structural, not automatic:
 
 - **MCP server**: hardcodes `ingestion_mode = live_mcp_capture` regardless of client input, so a client cannot launder LLM-reconstructed content through a mode claim. But the `content` field itself the server must accept as-given.
-- **Shipped templates**: `templates/CLAUDE.md`, `templates/claude_desktop_projects_instructions.md`, and `templates/loom-capture.sh` all include bolded instructions to pass verbatim content only. The PostSession hook specifically reads raw JSONL from disk with no LLM in the loop.
+- **Shipped templates**: one discipline block per first-class client lives under `templates/` and is referenced from its guide in `docs/clients/`. Every block includes bolded "do not summarize, paraphrase, or reconstruct" language. The Claude Code PostSession hook (`templates/loom-capture.sh`) specifically reads raw JSONL from disk with no LLM in the loop — it is the one path that achieves exhaustive capture without trusting a model to behave.
 - **Bootstrap parsers**: fail loud on schema drift; the `content` they post is a verbatim excerpt from the source export with no transformation step.
 - **CLI seed tool**: treats the user's markdown files as opaque verbatim content — no preprocessing, no summarization.
 - **User guide**: documents the invariant prominently, explains the failure mode in bold, describes the acceptable interview-style drafting pattern (user authors, Claude polishes, user reviews and approves) versus the unacceptable "Claude summarizes history" pattern.
@@ -51,8 +51,8 @@ This is the only defense. Documented rules plus client-side templates plus user 
 ### Negative
 
 - The invariant cannot be enforced automatically. A determined or careless user can violate it, and Loom will accept the violation. Detection is possible only by reading the content manually.
-- Users who expected to "seed Loom with what we discussed" via Claude Desktop summarization will find the documented pattern frustrating at first. The user guide explains why, but the friction is real.
-- Shipped templates are a maintenance surface: if Claude Desktop or Claude Code changes its memory-file format, the templates need updating. Accepted cost.
+- Users who expected to "seed Loom with what we discussed" via any client's summarization affordance will find the documented pattern frustrating at first. The user guide explains why, but the friction is real, and it's multiplied across every new client surface the project picks up.
+- Shipped templates are a maintenance surface: if any client changes its instruction-file format, MCP config schema, or agent manifest shape, the corresponding template under `templates/` and guide under `docs/clients/` needs updating. Accepted cost — the alternative is a single generic template that reads as written-for-no-one.
 
 ### Neutral
 

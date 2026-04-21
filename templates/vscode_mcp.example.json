@@ -1,0 +1,20 @@
+{
+  "_comment": "Reference MCP registration for GitHub Copilot in VS Code. Commit as .vscode/mcp.json in your workspace to share with the team, or paste into the user config via Command Palette → 'MCP: Open User Configuration'. Note the root key is 'servers' (not 'mcpServers' — that's Claude Desktop's convention). Copilot requires Agent mode for MCP tools to appear. The Loom server hardcodes ingestion_mode=live_mcp_capture on every loom_learn call from this transport.",
+  "servers": {
+    "loom": {
+      "type": "http",
+      "url": "https://loom.yourdomain.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${input:loom_token}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "loom_token",
+      "description": "Loom bearer token",
+      "password": true
+    }
+  ]
+}

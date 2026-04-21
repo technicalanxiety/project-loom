@@ -10,9 +10,9 @@ Every episode in Loom needs a provenance class. Without one, Stage 5 ranking can
 
 The amendment that motivated this ADR called out three real ingestion paths and one rejected path:
 
-1. **Mode 1 — user-authored seed.** Markdown the user writes describing their domain. Ingested via a CLI. Claude may help draft, but the user is the author.
-2. **Mode 2 — vendor export import.** Parsed content from Claude.ai, Claude Code JSONL, ChatGPT, Codex CLI. Historical backfill where export fidelity allows.
-3. **Mode 3 — live MCP capture.** Real-time verbatim capture via MCP-aware clients or the Claude Code PostSession hook.
+1. **Mode 1 — user-authored seed.** Markdown the user writes describing their domain. Ingested via a CLI. An LLM may help draft, but the user is the author.
+2. **Mode 2 — vendor export import.** Parsed content from published vendor exports. Current parsers cover Claude Code local JSONL, Claude.ai / Claude Desktop account export, ChatGPT Data Controls export, and Microsoft 365 Copilot Purview audit export. Historical backfill where export fidelity allows. Surfaces without a published export (currently GitHub Copilot Chat) have no Mode 2 path and rely on Mode 3 live capture only.
+3. **Mode 3 — live MCP capture.** Real-time verbatim capture via MCP-aware clients — Claude Code, Claude Desktop, ChatGPT Desktop (Developer Mode), GitHub Copilot (VS Code Agent mode), and M365 Copilot (declarative agents) — plus the Claude Code PostSession hook for exhaustive capture on that surface.
 4. **Rejected — LLM reconstruction.** Summaries, paraphrases, "what we discussed" recaps. Confident-sounding generation, not recall. No door in the architecture.
 
 Pre-amendment, all episodes flowed through the same `/api/learn` surface with no provenance tag. Ranking knew only evidence status (user_asserted > observed > extracted > inferred) — a semantic property of the extracted fact, not the episode it came from. A fact sourced from a seed document and a fact sourced from a live transcript were indistinguishable downstream.

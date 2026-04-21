@@ -430,7 +430,7 @@ mod connection_pool_separation {
             loom_bearer_token: "test".to_string(),
             llm: LlmConfig {
                 ollama_url: "http://ollama:11434".to_string(),
-                extraction_model: "gemma4:26b-a4b-q4".to_string(),
+                extraction_model: "gemma4:26b".to_string(),
                 classification_model: "gemma4:e4b".to_string(),
                 embedding_model: "nomic-embed-text".to_string(),
                 azure_openai_url: None,
@@ -475,7 +475,7 @@ mod connection_pool_separation {
             loom_bearer_token: "test".to_string(),
             llm: LlmConfig {
                 ollama_url: "http://ollama:11434".to_string(),
-                extraction_model: "gemma4:26b-a4b-q4".to_string(),
+                extraction_model: "gemma4:26b".to_string(),
                 classification_model: "gemma4:e4b".to_string(),
                 embedding_model: "nomic-embed-text".to_string(),
                 azure_openai_url: None,
@@ -516,7 +516,7 @@ mod connection_pool_separation {
             loom_bearer_token: "test".to_string(),
             llm: LlmConfig {
                 ollama_url: "http://ollama:11434".to_string(),
-                extraction_model: "gemma4:26b-a4b-q4".to_string(),
+                extraction_model: "gemma4:26b".to_string(),
                 classification_model: "gemma4:e4b".to_string(),
                 embedding_model: "nomic-embed-text".to_string(),
                 azure_openai_url: None,
@@ -644,7 +644,7 @@ mod unit_tests {
     fn local_model_selects_compact_format() {
         use loom_engine::types::compilation::OutputFormat;
 
-        let target_model = "gemma4:26b-a4b-q4";
+        let target_model = "gemma4:26b";
         let format = if target_model.to_lowercase().contains("claude") {
             OutputFormat::Structured
         } else {

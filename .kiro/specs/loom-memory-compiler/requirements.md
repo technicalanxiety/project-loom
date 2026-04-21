@@ -48,7 +48,7 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 3. THE Loom_Engine SHALL compute a SHA-256 content hash for each episode using the sha2 crate
 4. THE Loom_Engine SHALL record ingestion timestamp and source metadata for each episode
 5. WHERE an episode includes participant information, THE Loom_Engine SHALL store the participant list
-6. THE Loom_Engine SHALL support manual, claude-code, and github source types
+6. THE Loom_Engine SHALL accept a free-form `source` string identifier on ingestion — not an enumerated type — so new clients can self-identify without schema changes. Canonical source identifiers include (non-exhaustive): `claude-code`, `claude-desktop`, `chatgpt`, `github-copilot`, `m365-copilot`, `manual`, `github`
 7. THE Loom_Engine SHALL enforce that episode `content` is verbatim — a transcript excerpt, a vendor export excerpt, or user-authored prose — and never LLM summarization output; enforcement lives in the MCP tool contract, shipped client templates, and user discipline, not at runtime
 
 ### Requirement 2: Entity Extraction with Type Constraints
@@ -450,18 +450,20 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 4. THE Loom_Engine SHALL timestamp each snapshot
 5. THE Loom_Engine SHALL store snapshots in a dedicated audit table
 
-### Requirement 30: Claude Code Integration
+### Requirement 30: Client Integrations
 
-**User Story:** As a developer using Claude Code, I want Loom integrated via MCP, so that Claude can learn from my coding sessions and retrieve relevant memory.
+**User Story:** As the primary user of Loom, I want first-class integrations with every AI client I actually use, so that every surface — terminal, desktop chat, IDE, tenant-wide assistant — speaks to the same memory layer with equal footing.
 
 #### Acceptance Criteria
 
-1. THE Loom_Engine SHALL register MCP endpoints with Claude Code via HTTP transport
-2. THE Loom_Engine SHALL ingest episodes from Claude Code interactions with source type claude-code
-3. THE Loom_Engine SHALL resolve namespace from Claude Code working directory context
-4. THE Loom_Engine SHALL provide a CLAUDE.md configuration file documenting MCP integration
-5. THE Loom_Engine SHALL support manual namespace override in MCP calls
-6. THE Loom_Engine SHALL support Claude Code hooks for automatic post-session episode capture
+1. THE Loom_Engine SHALL expose MCP endpoints over HTTP transport that any MCP-compliant client can register with
+2. THE Loom_Engine SHALL ship a per-client integration guide under `docs/clients/` for each first-class client: Claude Code, Claude Desktop, ChatGPT Desktop, GitHub Copilot (VS Code), and Microsoft 365 Copilot
+3. THE Loom_Engine SHALL ship a discipline template under `templates/` for each first-class client, paired with its guide, enforcing the verbatim-content invariant (ADR-005)
+4. WHERE a client publishes a conversation export, THE Loom_Engine SHALL ship a bootstrap parser under `bootstrap/` that asserts a pinned schema and POSTs verbatim excerpts as `vendor_import` episodes
+5. WHERE a client does not publish a conversation export, THE Loom_Engine SHALL ship a stub parser that exits non-zero with a pointer to the live-capture path in the client guide
+6. THE Loom_Engine SHALL support manual namespace override in MCP calls regardless of client
+7. WHERE a client supports session-lifecycle hooks (currently Claude Code's PostSession), THE Loom_Engine SHALL ship a shell hook that achieves exhaustive verbatim live capture without model involvement. WHERE it does not, selective MCP `loom_learn` under the shipped discipline template SHALL be the documented path
+8. THE Loom_Engine SHALL hardcode `ingestion_mode = live_mcp_capture` at the MCP handler boundary regardless of which client is connected, so client-side forgery of the mode is impossible
 
 ### Requirement 31: Extraction Model Tracking and Selection
 
@@ -767,7 +769,7 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 #### Acceptance Criteria
 
 1. THE Loom_Engine SHALL connect to Ollama_Service via HTTP using the reqwest crate
-2. THE Loom_Engine SHALL use Gemma 4 26B MoE (gemma4:26b-a4b-q4) for entity and fact extraction
+2. THE Loom_Engine SHALL use Gemma 4 26B MoE (gemma4:26b) for entity and fact extraction
 3. THE Loom_Engine SHALL use Gemma 4 E4B (gemma4:e4b) for intent classification
 4. THE Loom_Engine SHALL use nomic-embed-text for generating 768-dimension embeddings
 5. THE Loom_Engine SHALL support Azure OpenAI as a fallback inference provider when Ollama is unavailable or when quality thresholds are not met with local models
@@ -852,9 +854,9 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 4. THE Dashboard SPA SHALL render a Parser Health page showing the per-parser rows and a note that failed parser runs do not appear here (they fail loud at the CLI and never write)
 5. THE Dashboard SPA SHALL render an Ingestion Mode Distribution page showing the per-namespace breakdown and prominently surfacing the seed-only warning list
 
-### Requirement 59: Exhaustive Live Capture via PostSession Hook
+### Requirement 59: Exhaustive Live Capture and Per-Client Discipline Templates
 
-**User Story:** As the primary user of Loom, I want Claude Code sessions captured in full, verbatim, without the model making judgment calls about what matters, so that the live-capture layer has no LLM inference at the boundary.
+**User Story:** As the primary user of Loom, I want Claude Code sessions captured in full, verbatim, without the model making judgment calls about what matters; and every other first-class client covered by a shipped discipline template that enforces the verbatim-content invariant on the selective-capture path.
 
 #### Acceptance Criteria
 
@@ -862,8 +864,13 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 2. THE hook SHALL POST the full transcript verbatim to `/api/learn` with `ingestion_mode = live_mcp_capture`
 3. THE hook SHALL NOT summarize, filter, or transform the transcript content before posting
 4. THE hook SHALL derive `source_event_id` from the session file path and modification time so re-runs are idempotent
-5. THE Loom_Engine SHALL ship a `templates/CLAUDE.md` template that instructs the model to call `loom_learn` only with verbatim content and to leave exhaustive capture to the hook
-6. THE Loom_Engine SHALL ship a `templates/claude_desktop_projects_instructions.md` template carrying the same verbatim-content discipline for Claude Desktop selective capture
+5. THE Loom_Engine SHALL ship a discipline template for every first-class client, each instructing the model to call `loom_learn` only with verbatim content:
+   - `templates/CLAUDE.md` — Claude Code project-scoped instructions
+   - `templates/claude_desktop_projects_instructions.md` — Claude Desktop Projects
+   - `templates/chatgpt_custom_instructions.md` — ChatGPT Custom Instructions / Projects (Developer Mode)
+   - `templates/github_copilot_instructions.md` — `.github/copilot-instructions.md` for VS Code Copilot Agent mode
+   - `templates/m365_copilot_instructions.md` — M365 Copilot declarative-agent `instructions` field
+6. Every discipline template SHALL include a bolded directive against summarizing, paraphrasing, or reconstructing — the language is load-bearing and must be preserved across revisions
 
 ---
 

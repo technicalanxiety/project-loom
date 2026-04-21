@@ -47,7 +47,7 @@ pub struct AppConfig {
 pub struct LlmConfig {
     /// Base URL for the Ollama API (e.g. `http://ollama:11434`).
     pub ollama_url: String,
-    /// Model name for entity/fact extraction (e.g. `gemma4:26b-a4b-q4`).
+    /// Model name for entity/fact extraction (e.g. `gemma4:26b`).
     pub extraction_model: String,
     /// Model name for intent classification (e.g. `gemma4:e4b`).
     pub classification_model: String,

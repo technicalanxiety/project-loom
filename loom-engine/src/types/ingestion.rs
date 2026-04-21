@@ -22,9 +22,11 @@ pub enum IngestionMode {
     /// direct REST call. The user is the author; an LLM may assist with
     /// drafting but does not author the content.
     UserAuthoredSeed,
-    /// Parsed content from a vendor export (Claude.ai, Claude Code JSONL,
-    /// ChatGPT, Codex CLI rollouts). Requires `parser_version` and
-    /// `parser_source_schema` on the episode row.
+    /// Parsed content from a published vendor export (Claude Code local
+    /// JSONL, Claude.ai / Claude Desktop account export, ChatGPT Data
+    /// Controls export, M365 Copilot Purview audit export, etc.).
+    /// Requires `parser_version` and `parser_source_schema` on the
+    /// episode row. Parsers live in `bootstrap/`.
     VendorImport,
     /// Real-time verbatim capture via an MCP-aware client. Hardcoded by the
     /// MCP server boundary on every `loom_learn` request; clients cannot

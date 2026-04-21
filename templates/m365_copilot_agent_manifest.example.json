@@ -1,0 +1,26 @@
+{
+  "_comment": "Reference declarative-agent manifest skeleton for a Microsoft 365 Copilot agent that wires Loom as an MCP action. Use this as a starting point in the Microsoft 365 Agents Toolkit (VS Code extension) when scaffolding an agent with 'Start with an MCP server'. Replace the MCP URL and the agent name/description, then deploy via the Toolkit. The Loom server hardcodes ingestion_mode=live_mcp_capture on every loom_learn call from this transport.",
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.0/schema.json",
+  "version": "v1.0",
+  "name": "Loom Memory",
+  "description": "Evidence-grounded memory for this tenant. Calls loom_think for context, loom_learn for verbatim capture, loom_recall for direct entity lookup.",
+  "instructions": "See templates/m365_copilot_instructions.md — paste the full block into this field. The verbatim-content discipline is load-bearing.",
+  "actions": [
+    {
+      "id": "loom_mcp",
+      "type": "mcp",
+      "mcp_endpoint": "https://loom.yourdomain.com/mcp/",
+      "auth": {
+        "type": "api_key",
+        "header": "Authorization",
+        "format": "Bearer {api_key}"
+      },
+      "tools": [
+        "loom_think",
+        "loom_learn",
+        "loom_recall"
+      ]
+    }
+  ],
+  "capabilities": []
+}
