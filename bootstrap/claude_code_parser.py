@@ -24,19 +24,38 @@ from typing import Iterator
 import urllib.request
 import urllib.error
 
+from loom_http import build_ssl_context
 from schema_assertions import SchemaAssertionError, assert_schema
 
-PARSER_VERSION = "claude_code_parser@0.1.0"
-PARSER_SOURCE_SCHEMA = "claude_code_jsonl_v1"
+PARSER_VERSION = "claude_code_parser@0.3.0"
+PARSER_SOURCE_SCHEMA = "claude_code_jsonl_v2"
 
 # Pinned schema. Each session file is a newline-delimited sequence of event
-# objects; every object must carry at minimum a type and a timestamp. Text
-# lives under different keys depending on the event type, but the outer
-# envelope is stable.
+# objects; every object carries a `type` and a `sessionId`. `timestamp` is
+# present on most record types but not all (`ai-title` and `last-prompt`
+# are metadata envelopes with no event time), so it is not part of the
+# outer-envelope assertion. The parser still requires *some* record in
+# each chunk to carry a timestamp so the episode's occurred_at field is
+# populated — see iter_chunks() below.
 REQUIRED_FIELDS = {
     "type": str,
-    "timestamp": str,
+    "sessionId": str,
 }
+
+# Per-episode byte cap. Long Claude Code sessions (multi-hour coding
+# work) can easily produce 3-5 MB of JSONL per file, which blows past
+# both the embedding model context window (nomic-embed-text: 8192
+# tokens) and the extractor's practical window. The parser splits each
+# session into chunks at record boundaries, capping each chunk at this
+# many bytes.
+#
+# Why 12 KiB, not the nominal ~32 KiB for an 8192-token window: code
+# tokenizes much denser than English prose (often 1-2 chars/token
+# versus ~4). Session JSONL is code- and tool-output-heavy, and a
+# chunk that looks fine at 24 KiB can blow 10K+ tokens once the
+# tokenizer sees it. 12 KiB keeps the worst-case chunk under 8K
+# tokens even on code-dense content.
+MAX_CHUNK_BYTES = 12 * 1024
 
 
 def iter_session_files(session_dir: Path) -> Iterator[Path]:
@@ -44,16 +63,52 @@ def iter_session_files(session_dir: Path) -> Iterator[Path]:
     yield from sorted(session_dir.rglob("*.jsonl"))
 
 
-def read_session(path: Path) -> tuple[str, str]:
-    """Read a JSONL session file and return (raw_text, occurred_at).
+def iter_chunks(path: Path) -> Iterator[tuple[str, str, int]]:
+    """Yield ``(content, occurred_at, chunk_index)`` tuples for a session.
 
-    Each record is validated against the pinned schema. The first record's
-    timestamp becomes the session's `occurred_at`. Raw text is returned
-    unchanged (no reformatting, no summarization) so the episode content
-    reaching Loom is byte-exact.
+    Reads the JSONL file line-by-line (each line is one record),
+    validates the pinned outer-envelope schema on every record, and
+    groups records into chunks that fit under ``MAX_CHUNK_BYTES``.
+    Chunks are split at record boundaries only — a single record is
+    never divided — so each chunk remains valid JSONL and every
+    downstream consumer (embedding, extraction) sees coherent records.
+
+    Every chunk inherits its ``occurred_at`` from the first
+    timestamp-bearing record within it. If a chunk contains no
+    timestamp-bearing records (metadata-only, rare), it inherits from
+    the previous chunk. If the very first chunk has no timestamp,
+    we fail loud: the session would be entirely untimed and unusable.
+
+    Raises:
+        SchemaAssertionError: malformed JSON, missing required envelope
+            fields, or a file that cannot produce a single timed chunk.
     """
     raw = path.read_text(encoding="utf-8")
-    occurred_at: str | None = None
+    last_seen_ts: str | None = None
+    buffer_lines: list[str] = []
+    buffer_bytes: int = 0
+    buffer_ts: str | None = None
+    chunk_index: int = 0
+
+    def flush() -> Iterator[tuple[str, str, int]]:
+        nonlocal buffer_lines, buffer_bytes, buffer_ts, chunk_index
+        if not buffer_lines:
+            return
+        # Prefer this chunk's own first timestamp; otherwise inherit
+        # from the last timestamp we saw in any prior chunk.
+        effective_ts = buffer_ts or last_seen_ts
+        if effective_ts is None:
+            raise SchemaAssertionError(
+                f"{PARSER_SOURCE_SCHEMA}: {path} chunk {chunk_index} "
+                f"has no timestamp and no prior chunk to inherit from"
+            )
+        content = "\n".join(buffer_lines) + "\n"
+        yield content, effective_ts, chunk_index
+        chunk_index += 1
+        buffer_lines = []
+        buffer_bytes = 0
+        buffer_ts = None
+
     for lineno, line in enumerate(raw.splitlines(), start=1):
         if not line.strip():
             continue
@@ -64,13 +119,32 @@ def read_session(path: Path) -> tuple[str, str]:
                 f"{PARSER_SOURCE_SCHEMA}: {path}:{lineno} is not valid JSON: {exc}"
             ) from exc
         assert_schema(record, REQUIRED_FIELDS, PARSER_SOURCE_SCHEMA)
-        if occurred_at is None:
-            occurred_at = record["timestamp"]
-    if occurred_at is None:
+
+        line_bytes = len(line.encode("utf-8")) + 1  # +1 for newline
+        ts = record.get("timestamp")
+        if isinstance(ts, str):
+            last_seen_ts = ts
+            if buffer_ts is None:
+                buffer_ts = ts
+
+        # If this line would overflow the chunk, flush first. A single
+        # record that exceeds MAX_CHUNK_BYTES on its own is emitted as
+        # its own oversized chunk — better to let the downstream
+        # pipeline hit a context-window error on one record than to
+        # silently drop data.
+        if buffer_bytes + line_bytes > MAX_CHUNK_BYTES and buffer_lines:
+            yield from flush()
+
+        buffer_lines.append(line)
+        buffer_bytes += line_bytes
+
+    # Emit the final chunk.
+    yield from flush()
+
+    if chunk_index == 0:
         raise SchemaAssertionError(
             f"{PARSER_SOURCE_SCHEMA}: {path} contains no non-empty records"
         )
-    return raw, occurred_at
 
 
 def post_episode(
@@ -103,7 +177,7 @@ def post_episode(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=build_ssl_context()) as resp:
             body = resp.read().decode("utf-8")
             print(f"ok {source_event_id} -> {body}")
     except urllib.error.HTTPError as exc:
@@ -142,21 +216,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {args.session_dir} is not a directory", file=sys.stderr)
         return 2
 
-    count = 0
+    session_count = 0
+    chunk_count = 0
     for path in iter_session_files(args.session_dir):
-        raw, occurred_at = read_session(path)
-        source_event_id = f"claude-code-bootstrap:{path.relative_to(args.session_dir)}"
-        post_episode(
-            base_url=loom_url,
-            token=loom_token,
-            namespace=args.namespace,
-            content=raw,
-            occurred_at=occurred_at,
-            source_event_id=source_event_id,
-        )
-        count += 1
+        rel = path.relative_to(args.session_dir)
+        for content, occurred_at, chunk_index in iter_chunks(path):
+            source_event_id = f"claude-code-bootstrap:{rel}:{chunk_index:05d}"
+            post_episode(
+                base_url=loom_url,
+                token=loom_token,
+                namespace=args.namespace,
+                content=content,
+                occurred_at=occurred_at,
+                source_event_id=source_event_id,
+            )
+            chunk_count += 1
+        session_count += 1
 
-    print(f"done: posted {count} sessions from {args.session_dir}")
+    print(
+        f"done: posted {chunk_count} chunks across {session_count} sessions "
+        f"from {args.session_dir}"
+    )
     return 0
 
 

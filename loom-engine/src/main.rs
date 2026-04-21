@@ -1,10 +1,15 @@
-use axum::{
-    middleware,
-    routing::{get, post},
-    Router,
-};
+use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
 use std::net::SocketAddr;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+// Maximum request body size for ingestion endpoints. Raw Claude Code
+// session JSONL files regularly exceed axum's 2 MiB default (one of my
+// own is 3.5 MiB), and the design decision is one-episode-per-session
+// rather than chunking, so the limit has to accommodate a full session.
+// 64 MiB is comfortable headroom for the largest transcripts I have
+// observed while still refusing pathological uploads.
+const INGEST_BODY_LIMIT_BYTES: usize = 64 * 1024 * 1024;
 
 mod api;
 mod config;
@@ -18,7 +23,9 @@ mod worker;
 use api::auth::require_bearer_token;
 use api::dashboard;
 use api::mcp::{handle_loom_learn, handle_loom_recall, handle_loom_think, AppState};
+use api::mcp_rpc::handle_mcp_rpc;
 use api::rest::{handle_api_learn, handle_github_webhook, handle_health};
+use worker::{processor, scheduler};
 
 #[tokio::main]
 async fn main() {
@@ -84,10 +91,19 @@ async fn main() {
     };
 
     // MCP routes — all protected by bearer token middleware.
+    //
+    // - `POST /mcp` is the JSON-RPC 2.0 dispatcher used by every real MCP
+    //   client (Claude Desktop, ChatGPT Desktop, GitHub Copilot, M365 Copilot,
+    //   Claude Code, and the mcp-remote stdio bridge).
+    // - The per-tool REST endpoints (`/mcp/loom_learn` etc.) remain mounted
+    //   for direct curl testing, integration tests, and callers that predate
+    //   the dispatcher.
     let mcp_routes = Router::new()
+        .route("/mcp", post(handle_mcp_rpc))
         .route("/mcp/loom_learn", post(handle_loom_learn))
         .route("/mcp/loom_think", post(handle_loom_think))
         .route("/mcp/loom_recall", post(handle_loom_recall))
+        .layer(DefaultBodyLimit::max(INGEST_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
             require_bearer_token,
@@ -95,8 +111,12 @@ async fn main() {
         .with_state(state.clone());
 
     // REST /api/learn — protected by bearer token middleware.
+    // Raised body limit so bootstrap parsers can POST full session
+    // transcripts (Claude Code JSONL, Claude.ai export, Purview audit
+    // bundles) as single episodes without chunking.
     let rest_learn_route = Router::new()
         .route("/api/learn", post(handle_api_learn))
+        .layer(DefaultBodyLimit::max(INGEST_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
             require_bearer_token,
@@ -227,9 +247,49 @@ async fn main() {
         .merge(public_routes)
         .merge(dashboard_routes);
 
+    // ── Background workers ──────────────────────────────────────────
+    // The offline processor polls for unprocessed episodes and runs
+    // the full extraction pipeline against each. The scheduler runs
+    // daily hot-tier snapshots, daily tier management, and a weekly
+    // entity-health-check. Both are spawned before axum::serve so the
+    // runtime has them registered; both respect the same cancellation
+    // token so a graceful shutdown stops everything in order.
+    let cancel_token = CancellationToken::new();
+
+    let retry_policy = processor::RetryPolicy::new(
+        state.config.episode_max_attempts,
+        state.config.episode_backoff_base_secs,
+    );
+
+    let _processor_handle = processor::start_processing_loop(
+        state.pools.offline.clone(),
+        state.llm_client.clone(),
+        state.config.llm.clone(),
+        retry_policy,
+        cancel_token.clone(),
+        None, // default poll interval (5s)
+        None, // default concurrency (4)
+    );
+
+    let _scheduler_handles = scheduler::start_scheduler(
+        state.pools.offline.clone(),
+        cancel_token.clone(),
+    );
+
     let addr = SocketAddr::from(([0, 0, 0, 0], state.config.loom_port));
     tracing::info!("loom-engine listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    // Graceful shutdown: on Ctrl-C, cancel the background workers and
+    // let axum drain in-flight requests before exiting.
+    let shutdown_token = cancel_token.clone();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("shutdown signal received, cancelling background workers");
+            shutdown_token.cancel();
+        })
+        .await
+        .unwrap();
 }

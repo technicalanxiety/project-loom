@@ -1,13 +1,17 @@
 {
-  "_comment": "Reference MCP registration for Claude Desktop. Copy into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%\\Claude\\claude_desktop_config.json (Windows), then replace LOOM_TOKEN and the URL placeholder. The Loom server hardcodes ingestion_mode=live_mcp_capture on every loom_learn call from this transport.",
+  "_comment": "Reference MCP registration for Claude Desktop. Copy into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%\\Claude\\claude_desktop_config.json (Windows), then replace the bearer token and URL placeholders. Claude Desktop is stdio-only in shipped versions at time of writing, so the mcp-remote bridge (npx @modelcontextprotocol/mcp-remote) wraps Loom's HTTP MCP endpoint into stdio. Remove the NODE_TLS_REJECT_UNAUTHORIZED env line once you have a real cert; it is there only to tolerate the self-signed cert Caddy generates for localhost. The Loom server hardcodes ingestion_mode=live_mcp_capture on every loom_learn call from this transport.",
   "mcpServers": {
     "loom": {
-      "transport": {
-        "type": "http",
-        "url": "https://loom.yourdomain.com/mcp",
-        "headers": {
-          "Authorization": "Bearer ${LOOM_TOKEN}"
-        }
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://loom.yourdomain.com/mcp",
+        "--header",
+        "Authorization:Bearer REPLACE_WITH_LOOM_BEARER_TOKEN"
+      ],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
       }
     }
   }

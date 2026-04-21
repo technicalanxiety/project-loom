@@ -3,4 +3,5 @@
 pub mod auth;
 pub mod dashboard;
 pub mod mcp;
+pub mod mcp_rpc;
 pub mod rest;

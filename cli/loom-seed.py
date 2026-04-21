@@ -30,12 +30,27 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import sys
 from pathlib import Path
 from typing import Iterable
 
 import urllib.request
 import urllib.error
+
+
+def _ssl_context() -> ssl.SSLContext | None:
+    """Honor LOOM_TLS_INSECURE=1 for localhost / self-signed-cert
+    development. Same pattern as `bootstrap/loom_http.py`; duplicated
+    inline here to keep the CLI a single standalone file with no
+    sibling imports.
+    """
+    if os.environ.get("LOOM_TLS_INSECURE", "").lower() in ("1", "true", "yes"):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    return None
 
 
 SOURCE = "seed"
@@ -86,7 +101,7 @@ def post_seed(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
             body = resp.read().decode("utf-8")
             print(f"ok {source_event_id} -> {body}")
     except urllib.error.HTTPError as exc:

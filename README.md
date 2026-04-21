@@ -239,11 +239,21 @@ This starts all five containers. PostgreSQL migrations run automatically on firs
 
 ### 3. Pull Ollama models (first run only)
 
+Ollama runs natively on the host by default (required on Apple Silicon —
+Docker cannot pass through Metal). Install via `brew install ollama`
+or the Ollama desktop app, start it (`ollama serve` or the menu-bar
+app), then:
+
 ```bash
-docker compose exec ollama ollama pull nomic-embed-text
-docker compose exec ollama ollama pull gemma4:e4b
-docker compose exec ollama ollama pull gemma4:26b
+ollama pull nomic-embed-text
+ollama pull gemma4:e4b
+ollama pull gemma4:26b        # optional; only if you have >=24 GB unified memory
 ```
+
+If you are on Linux with CUDA and prefer to run Ollama in a container,
+enable the `with-docker-ollama` Compose profile instead — see the
+comment in `docker-compose.yml` and set
+`OLLAMA_URL=http://ollama:11434` in `.env`.
 
 > Pull `nomic-embed-text` first — it's small and needed for basic operation. The larger Gemma models can download in the background.
 
