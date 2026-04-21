@@ -15,8 +15,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.1"
   },
   "devDependencies": {
@@ -24,13 +24,13 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.4",
     "jsdom": "^29.0.2",
-    "typescript": "^5.6.3",
-    "vite": "^6.0.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.9",
     "vitest": "^4.1.4"
   }
 }
