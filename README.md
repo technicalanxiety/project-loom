@@ -86,8 +86,8 @@ graph TB
         Models[gemma4:26b-a4b-q4<br/>gemma4:e4b<br/>nomic-embed-text]
     end
 
-    subgraph "PostgreSQL 16"
-        DB[(pgvector + pgAudit<br/>loom_* tables)]
+    subgraph "PostgreSQL 17"
+        DB[(pgvector + optional pgAudit<br/>loom_* tables)]
     end
 
     CC --> Caddy
@@ -126,11 +126,11 @@ graph TB
 
 | Container | Image | Purpose |
 |-----------|-------|---------|
-| **loom-engine** | Rust binary (~20MB) | MCP, REST, Dashboard API, offline pipeline, scheduled tasks |
-| **loom-dashboard** | Vite + React SPA | Static files served by Caddy |
-| **postgres** | pgvector/pgvector:pg16 | Single data store with pgvector + pgAudit |
+| **loom-engine** | Rust binary on debian:bookworm-slim | MCP, REST, Dashboard API, offline pipeline, scheduled tasks |
+| **loom-dashboard** | Build-only (node:22 → busybox) | React bundle populated into `dashboard_dist` volume, container exits |
+| **postgres** | pgvector/pgvector:pg17 | Single data store with pgvector (pgAudit optional — image doesn't ship it) |
 | **ollama** | ollama/ollama:latest | Local LLM inference (zero cloud dependency) |
-| **caddy** | caddy:2-alpine | TLS termination, reverse proxy, static file serving |
+| **caddy** | caddy:2-alpine | TLS termination, reverse proxy, static file serving, bearer-token injection for dashboard API |
 
 ### Pipeline Separation
 
@@ -143,12 +143,12 @@ The online and offline pipelines share PostgreSQL but use **separate connection 
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Engine** | Rust (tokio + axum) | Single binary serving all APIs. Compile-time SQL checking via sqlx. |
-| **Database** | PostgreSQL 16 + pgvector + pgAudit | Single system of record. Vector similarity, audit logging, graph traversal. |
+| **Engine** | Rust (tokio + axum 0.8 + sqlx 0.8) | Single binary serving all APIs. `ring` is the rustls crypto provider (keeps `aws-lc-sys` out of the build). |
+| **Database** | PostgreSQL 17 + pgvector (pgAudit optional) | Single system of record. Vector similarity, graph traversal, application-level audit logging via `loom_audit_log`. |
 | **LLM Inference** | Ollama | Gemma 4 26B MoE (extraction), Gemma 4 E4B (classification), nomic-embed-text (embeddings 768d). |
-| **Dashboard** | React 18 + Vite 6 + TypeScript | Pipeline health, graph explorer, trace viewer, conflict review, metrics. |
-| **Reverse Proxy** | Caddy | Automatic TLS, static file serving, API routing. |
-| **Auth** | Bearer token (tower middleware) | Constant-time comparison, applied at router level. |
+| **Dashboard** | React 19 + Vite 8 + TypeScript 6 + vitest 4 + biome 2 | Pipeline health, graph explorer, trace viewer, conflict review, metrics, parser health, ingestion distribution. |
+| **Reverse Proxy** | Caddy | Automatic TLS, static file serving, API routing, bearer-token injection on `/dashboard/api/*`. |
+| **Auth** | Bearer token (tower middleware) | Constant-time comparison, applied at router level. External clients (MCP / REST) carry their own token; Caddy injects on behalf of the in-browser SPA. |
 
 ## Key Features
 
@@ -532,7 +532,11 @@ Returns `{"status": "ok"}` when all components are healthy, `{"status": "degrade
 
 ## Dashboard
 
-The operational dashboard is a React SPA at `https://localhost`. It requires bearer token authentication.
+The operational dashboard is a React SPA at `https://localhost`. In the browser you don't supply a token — Caddy injects `Authorization: Bearer $LOOM_BEARER_TOKEN` on every `/dashboard/api/*` request on the SPA's behalf. Just open the URL.
+
+The token still lives in `.env` (shared with the engine). Caddy reads it via `${LOOM_BEARER_TOKEN}` expansion at startup. See [ADR-006](docs/adr/006-dashboard-auth-injection.md) for the security trade-off (CSRF exposure on `/dashboard/api/*` in exchange for skipping a login flow — acceptable for localhost / trusted-network deployment, not for hostile networks).
+
+External clients calling `/mcp/*` or `/api/*` still carry their own bearer token — Caddy does not inject on those paths.
 
 ### Dashboard Views
 
@@ -552,31 +556,31 @@ The operational dashboard is a React SPA at `https://localhost`. It requires bea
 
 ### Dashboard API Endpoints
 
-All dashboard endpoints are under `/dashboard/api/` and require bearer token auth.
+All dashboard endpoints are under `/dashboard/api/`. Requests flow through Caddy, which injects the bearer token transparently; the engine itself still requires `Authorization: Bearer <token>` on every hit, so bypassing Caddy (e.g. calling the engine's port directly) requires supplying the header manually.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/dashboard/api/health` | Pipeline health overview |
 | GET | `/dashboard/api/namespaces` | Namespace listing with tier budgets |
 | GET | `/dashboard/api/compilations` | Compilation trace list (paginated) |
-| GET | `/dashboard/api/compilations/:id` | Compilation trace detail |
+| GET | `/dashboard/api/compilations/{id}` | Compilation trace detail |
 | GET | `/dashboard/api/entities` | Entity search (filter by namespace, type, name) |
-| GET | `/dashboard/api/entities/:id` | Entity detail with facts |
-| GET | `/dashboard/api/entities/:id/graph` | Entity graph neighborhood |
+| GET | `/dashboard/api/entities/{id}` | Entity detail with facts |
+| GET | `/dashboard/api/entities/{id}/graph` | Entity graph neighborhood |
 | GET | `/dashboard/api/facts` | Fact listing (filter by namespace, predicate, status) |
 | GET | `/dashboard/api/conflicts` | Entity conflict queue |
 | GET | `/dashboard/api/predicates/candidates` | Predicate candidate queue |
 | GET | `/dashboard/api/predicates/packs` | Predicate pack listing |
-| GET | `/dashboard/api/predicates/packs/:pack` | Pack detail with predicates |
-| GET | `/dashboard/api/predicates/active/:namespace` | Active predicates for namespace |
+| GET | `/dashboard/api/predicates/packs/{pack}` | Pack detail with predicates |
+| GET | `/dashboard/api/predicates/active/{namespace}` | Active predicates for namespace |
 | GET | `/dashboard/api/metrics/retrieval` | Retrieval quality metrics |
 | GET | `/dashboard/api/metrics/extraction` | Extraction pipeline metrics |
 | GET | `/dashboard/api/metrics/classification` | Classification confidence distribution |
 | GET | `/dashboard/api/metrics/hot-tier` | Hot-tier utilization per namespace |
 | GET | `/dashboard/api/metrics/parser-health` | Per-bootstrap-parser rows: version, schema, episode count, last ingested |
 | GET | `/dashboard/api/metrics/ingestion-distribution` | Per-namespace Mode 1/2/3 counts + seed-only warning list |
-| POST | `/dashboard/api/conflicts/:id/resolve` | Resolve entity conflict |
-| POST | `/dashboard/api/predicates/candidates/:id/resolve` | Resolve predicate candidate |
+| POST | `/dashboard/api/conflicts/{id}/resolve` | Resolve entity conflict |
+| POST | `/dashboard/api/predicates/candidates/{id}/resolve` | Resolve predicate candidate |
 
 ---
 

@@ -37,9 +37,34 @@ Loom's authority hierarchy — Episodes > Facts > Procedures — assumes episode
 
 ### Authentication
 
-- API access is protected by bearer token authentication (MVP).
-- Target architecture: API keys with rotation, hashed storage, and per-key rate limiting.
+- API access is protected by bearer token authentication. Tokens are compared
+  in constant time to prevent timing attacks (see `loom-engine/src/api/auth.rs`).
+- External clients calling `/mcp/*` and `/api/*` must supply their own
+  `Authorization: Bearer <token>` header. Bootstrap parsers, the PostSession
+  capture hook, the CLI seed tool, Claude Code, and Claude Desktop all do.
+- The in-browser React SPA cannot carry a token of its own, so **Caddy
+  injects** `Authorization: Bearer $LOOM_BEARER_TOKEN` on `/dashboard/api/*`
+  requests on the SPA's behalf. This is a deliberate trade-off documented
+  in [ADR-006](docs/adr/006-dashboard-auth-injection.md): simplicity (no
+  login flow, no browser-side token storage) in exchange for CSRF exposure
+  on dashboard endpoints. Acceptable for localhost / trusted-network
+  deployment per `PROJECT-STANCE.md`; forks deploying to hostile networks
+  should replace the Caddy block with a proper login flow.
 - All auth tokens are loaded from environment variables, never hardcoded.
+
+### TLS and crypto provider
+
+- `reqwest` is compiled with `rustls-no-provider` so that `aws-lc-sys` is
+  not pulled into the dependency graph (`aws-lc-sys` cannot cross-compile
+  to musl and requires a full sysroot for `-m64`). `ring` is the installed
+  rustls crypto provider instead.
+- Provider installation lives in `loom-engine/src/crypto.rs` as an
+  idempotent `ensure_crypto_provider()` helper wrapped in `std::sync::Once`.
+  It is called from both `main()` at startup and `LlmClient::new()`, so the
+  release binary and the test harness install the provider on the same
+  path — there is no provider-state skew between prod and test.
+- Caddy handles client-facing TLS termination with its built-in CA (self-
+  signed for localhost) or ACME (Let's Encrypt for real domains).
 
 ### Data Protection
 
