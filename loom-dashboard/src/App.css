@@ -62,7 +62,9 @@ body {
   text-decoration: none;
   font-size: 0.85rem;
   border-radius: 6px;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .sidebar nav a:hover {

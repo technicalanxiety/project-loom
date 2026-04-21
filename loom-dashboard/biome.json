@@ -1,7 +1,5 @@
 {
-  "organizeImports": {
-    "enabled": true
-  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
@@ -16,13 +14,13 @@
         "useExhaustiveDependencies": "warn"
       },
       "style": {
-        "noVar": "error",
         "useConst": "error",
         "useTemplate": "warn"
       },
       "suspicious": {
         "noExplicitAny": "warn",
-        "noConsoleLog": "warn"
+        "noVar": "error",
+        "noConsole": { "level": "warn", "options": { "allow": ["log"] } }
       }
     }
   },

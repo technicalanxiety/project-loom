@@ -49,6 +49,10 @@ describe('API client', () => {
   const fetchSpy = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>();
 
   beforeEach(() => {
+    // Clear call history between tests. vi.restoreAllMocks() in vitest 4+
+    // only resets vi.spyOn() mocks, not vi.fn() instances, so calls[0]
+    // indexing would accumulate across tests without an explicit clear.
+    fetchSpy.mockClear();
     vi.stubGlobal('fetch', fetchSpy);
   });
 

@@ -12,7 +12,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres",
 pgvector = { version = "0.4", features = ["sqlx"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -28,5 +28,5 @@ dotenvy = "0.15"
 proptest = "1"
 tokio-test = "0.4"
 wiremock = "0.6"
-fake = { version = "3", features = ["derive"] }
+fake = { version = "5", features = ["derive"] }
 assert_matches = "1.5"

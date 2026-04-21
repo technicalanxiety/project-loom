@@ -30,8 +30,8 @@ export const ParserHealthPage: React.FC = () => {
       <div>
         <h2>Parser Health</h2>
         <p style={{ color: '#888' }}>
-          No vendor-import episodes yet. Run a parser under <code>bootstrap/</code> to
-          populate this view.
+          No vendor-import episodes yet. Run a parser under <code>bootstrap/</code> to populate this
+          view.
         </p>
       </div>
     );
@@ -41,10 +41,9 @@ export const ParserHealthPage: React.FC = () => {
     <div>
       <h2>Parser Health</h2>
       <p style={{ color: '#888', fontSize: '0.85rem', maxWidth: 640 }}>
-        One row per <code>(parser_version, parser_source_schema)</code> pair
-        across all <code>vendor_import</code> episodes. Parsers that fail
-        schema assertions do not appear here — they exit non-zero before
-        writing.
+        One row per <code>(parser_version, parser_source_schema)</code> pair across all{' '}
+        <code>vendor_import</code> episodes. Parsers that fail schema assertions do not appear here
+        — they exit non-zero before writing.
       </p>
       <table
         style={{
@@ -78,9 +77,7 @@ export const ParserHealthPage: React.FC = () => {
               <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 600 }}>
                 {row.episode_count.toLocaleString()}
               </td>
-              <td style={{ padding: '0.5rem', color: '#aaa' }}>
-                {row.last_ingested_at ?? '—'}
-              </td>
+              <td style={{ padding: '0.5rem', color: '#aaa' }}>{row.last_ingested_at ?? '—'}</td>
             </tr>
           ))}
         </tbody>

@@ -32,10 +32,9 @@ function groupByNamespace(
 ): Map<string, Map<IngestionDistributionRow['ingestion_mode'], number>> {
   const grid = new Map<string, Map<IngestionDistributionRow['ingestion_mode'], number>>();
   for (const r of rows) {
-    if (!grid.has(r.namespace)) {
-      grid.set(r.namespace, new Map());
-    }
-    grid.get(r.namespace)!.set(r.ingestion_mode, r.episode_count);
+    const modes = grid.get(r.namespace) ?? new Map();
+    modes.set(r.ingestion_mode, r.episode_count);
+    grid.set(r.namespace, modes);
   }
   return grid;
 }
@@ -61,10 +60,9 @@ export const IngestionDistributionPage: React.FC = () => {
     <div>
       <h2>Ingestion Mode Distribution</h2>
       <p style={{ color: '#888', fontSize: '0.85rem', maxWidth: 640 }}>
-        Episode counts per namespace split by ingestion mode. Seed-only
-        namespaces are listed separately — every compiled fact from those
-        namespaces carries <code>sole_source=true</code>, meaning it has
-        no live or vendor corroboration.
+        Episode counts per namespace split by ingestion mode. Seed-only namespaces are listed
+        separately — every compiled fact from those namespaces carries <code>sole_source=true</code>
+        , meaning it has no live or vendor corroboration.
       </p>
 
       {data.seed_only_namespaces.length > 0 && (
@@ -80,9 +78,8 @@ export const IngestionDistributionPage: React.FC = () => {
         >
           <strong style={{ color: '#e0b070' }}>Seed-only namespaces</strong>
           <p style={{ margin: '0.5rem 0', color: '#d0a060' }}>
-            These namespaces have no live-captured or vendor-imported
-            episodes. Compilation will flag every fact from them as
-            sole-source.
+            These namespaces have no live-captured or vendor-imported episodes. Compilation will
+            flag every fact from them as sole-source.
           </p>
           <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
             {data.seed_only_namespaces.map((ns) => (
@@ -116,7 +113,8 @@ export const IngestionDistributionPage: React.FC = () => {
         </thead>
         <tbody>
           {namespaces.map((ns) => {
-            const modeMap = grid.get(ns)!;
+            const modeMap =
+              grid.get(ns) ?? new Map<IngestionDistributionRow['ingestion_mode'], number>();
             const total = Array.from(modeMap.values()).reduce((a, b) => a + b, 0);
             return (
               <tr key={ns} style={{ borderBottom: '1px solid #222' }}>
@@ -126,7 +124,11 @@ export const IngestionDistributionPage: React.FC = () => {
                 {MODE_ORDER.map((mode) => (
                   <td
                     key={mode}
-                    style={{ padding: '0.5rem', textAlign: 'right', color: modeMap.get(mode) ? '#eee' : '#555' }}
+                    style={{
+                      padding: '0.5rem',
+                      textAlign: 'right',
+                      color: modeMap.get(mode) ? '#eee' : '#555',
+                    }}
                   >
                     {(modeMap.get(mode) ?? 0).toLocaleString()}
                   </td>

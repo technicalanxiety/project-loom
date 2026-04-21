@@ -13,7 +13,12 @@ import type React from 'react';
 import { useCallback, useState } from 'react';
 import { getBenchmarkDetail, getBenchmarkRuns, runBenchmark } from '../api/client';
 import { useApi } from '../hooks/useApi';
-import type { BenchmarkComparison, BenchmarkRun, BenchmarkTaskResult, ConditionSummary } from '../types';
+import type {
+  BenchmarkComparison,
+  BenchmarkRun,
+  BenchmarkTaskResult,
+  ConditionSummary,
+} from '../types';
 
 /** Condition label mapping for display. */
 const CONDITION_LABELS: Record<string, string> = {
@@ -66,14 +71,8 @@ const ConditionCard: React.FC<ConditionCardProps> = ({ label, condition, summary
           improvement={tokenReduction}
           suffix="reduction"
         />
-        <MetricRow
-          label="Success Rate"
-          value={`${(summary.success_rate * 100).toFixed(1)}%`}
-        />
-        <MetricRow
-          label="Avg Latency"
-          value={`${summary.avg_latency_ms.toFixed(0)}ms`}
-        />
+        <MetricRow label="Success Rate" value={`${(summary.success_rate * 100).toFixed(1)}%`} />
+        <MetricRow label="Avg Latency" value={`${summary.avg_latency_ms.toFixed(0)}ms`} />
       </div>
     </div>
   );
@@ -89,7 +88,14 @@ interface MetricRowProps {
 
 /** A single metric with optional improvement badge. */
 const MetricRow: React.FC<MetricRowProps> = ({ label, value, improvement, suffix }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+  <div
+    style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      fontSize: '0.85rem',
+    }}
+  >
     <span style={{ color: '#666' }}>{label}</span>
     <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
       <strong>{value}</strong>
@@ -103,7 +109,8 @@ const MetricRow: React.FC<MetricRowProps> = ({ label, value, improvement, suffix
             color: improvement > 0 ? '#2e7d32' : '#c62828',
           }}
         >
-          {improvement > 0 ? '+' : ''}{improvement.toFixed(1)}% {suffix ?? ''}
+          {improvement > 0 ? '+' : ''}
+          {improvement.toFixed(1)}% {suffix ?? ''}
         </span>
       )}
     </span>
@@ -128,24 +135,40 @@ const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
       <thead>
         <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
           <th style={{ padding: '0.5rem' }}>Task</th>
-          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>Precision</th>
-          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>Tokens</th>
-          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>Success</th>
-          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>Latency (ms)</th>
+          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>
+            Precision
+          </th>
+          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>
+            Tokens
+          </th>
+          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>
+            Success
+          </th>
+          <th style={{ padding: '0.5rem', textAlign: 'center' }} colSpan={3}>
+            Latency (ms)
+          </th>
         </tr>
         <tr style={{ borderBottom: '1px solid #eee', fontSize: '0.7rem', color: '#888' }}>
           <th style={{ padding: '0.25rem 0.5rem' }} />
           {['A', 'B', 'C'].map((c) => (
-            <th key={`p-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>{c}</th>
+            <th key={`p-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>
+              {c}
+            </th>
           ))}
           {['A', 'B', 'C'].map((c) => (
-            <th key={`t-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>{c}</th>
+            <th key={`t-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>
+              {c}
+            </th>
           ))}
           {['A', 'B', 'C'].map((c) => (
-            <th key={`s-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>{c}</th>
+            <th key={`s-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>
+              {c}
+            </th>
           ))}
           {['A', 'B', 'C'].map((c) => (
-            <th key={`l-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>{c}</th>
+            <th key={`l-${c}`} style={{ padding: '0.25rem', textAlign: 'center' }}>
+              {c}
+            </th>
           ))}
         </tr>
       </thead>
@@ -158,21 +181,50 @@ const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
             <tr key={taskName} style={{ borderBottom: '1px solid #f0f0f0' }}>
               <td style={{ padding: '0.5rem', fontWeight: 500 }}>{taskName}</td>
               {/* Precision */}
-              <td style={{ padding: '0.25rem', textAlign: 'center' }}>{a ? (a.precision * 100).toFixed(0) : '—'}%</td>
-              <td style={{ padding: '0.25rem', textAlign: 'center' }}>{b ? (b.precision * 100).toFixed(0) : '—'}%</td>
-              <td style={{ padding: '0.25rem', textAlign: 'center', fontWeight: 600, color: '#2e7d32' }}>
+              <td style={{ padding: '0.25rem', textAlign: 'center' }}>
+                {a ? (a.precision * 100).toFixed(0) : '—'}%
+              </td>
+              <td style={{ padding: '0.25rem', textAlign: 'center' }}>
+                {b ? (b.precision * 100).toFixed(0) : '—'}%
+              </td>
+              <td
+                style={{
+                  padding: '0.25rem',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  color: '#2e7d32',
+                }}
+              >
                 {c ? (c.precision * 100).toFixed(0) : '—'}%
               </td>
               {/* Tokens */}
               <td style={{ padding: '0.25rem', textAlign: 'center' }}>{a?.token_count ?? '—'}</td>
               <td style={{ padding: '0.25rem', textAlign: 'center' }}>{b?.token_count ?? '—'}</td>
-              <td style={{ padding: '0.25rem', textAlign: 'center', fontWeight: 600, color: '#2e7d32' }}>
+              <td
+                style={{
+                  padding: '0.25rem',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  color: '#2e7d32',
+                }}
+              >
                 {c?.token_count ?? '—'}
               </td>
               {/* Success */}
-              <td style={{ padding: '0.25rem', textAlign: 'center' }}>{a?.task_success ? '✓' : '✗'}</td>
-              <td style={{ padding: '0.25rem', textAlign: 'center' }}>{b?.task_success ? '✓' : '✗'}</td>
-              <td style={{ padding: '0.25rem', textAlign: 'center', fontWeight: 600, color: c?.task_success ? '#2e7d32' : '#c62828' }}>
+              <td style={{ padding: '0.25rem', textAlign: 'center' }}>
+                {a?.task_success ? '✓' : '✗'}
+              </td>
+              <td style={{ padding: '0.25rem', textAlign: 'center' }}>
+                {b?.task_success ? '✓' : '✗'}
+              </td>
+              <td
+                style={{
+                  padding: '0.25rem',
+                  textAlign: 'center',
+                  fontWeight: 600,
+                  color: c?.task_success ? '#2e7d32' : '#c62828',
+                }}
+              >
                 {c?.task_success ? '✓' : '✗'}
               </td>
               {/* Latency */}
@@ -231,9 +283,7 @@ export const BenchmarkPage: React.FC = () => {
     <div>
       <div className="page-header">
         <h2>Benchmarks</h2>
-        <p>
-          A/B/C condition comparison: No Memory (A) vs Episode-Only (B) vs Full Loom (C).
-        </p>
+        <p>A/B/C condition comparison: No Memory (A) vs Episode-Only (B) vs Full Loom (C).</p>
       </div>
 
       {/* Run controls */}
@@ -258,11 +308,26 @@ export const BenchmarkPage: React.FC = () => {
           </button>
         </div>
 
-        {loading && <p className="loading" style={{ marginTop: '0.75rem' }}>Loading runs…</p>}
-        {error && <p className="error" style={{ marginTop: '0.75rem' }}>{error}</p>}
+        {loading && (
+          <p className="loading" style={{ marginTop: '0.75rem' }}>
+            Loading runs…
+          </p>
+        )}
+        {error && (
+          <p className="error" style={{ marginTop: '0.75rem' }}>
+            {error}
+          </p>
+        )}
 
         {runs && runs.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', marginTop: '0.75rem' }}>
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontSize: '0.85rem',
+              marginTop: '0.75rem',
+            }}
+          >
             <thead>
               <tr style={{ borderBottom: '2px solid #eee', textAlign: 'left' }}>
                 <th style={{ padding: '0.5rem' }}>Name</th>
@@ -288,8 +353,18 @@ export const BenchmarkPage: React.FC = () => {
                         padding: '0.15rem 0.4rem',
                         borderRadius: '3px',
                         fontSize: '0.75rem',
-                        background: run.status === 'completed' ? '#e8f5e9' : run.status === 'failed' ? '#fbe9e7' : '#fff3e0',
-                        color: run.status === 'completed' ? '#2e7d32' : run.status === 'failed' ? '#c62828' : '#e65100',
+                        background:
+                          run.status === 'completed'
+                            ? '#e8f5e9'
+                            : run.status === 'failed'
+                              ? '#fbe9e7'
+                              : '#fff3e0',
+                        color:
+                          run.status === 'completed'
+                            ? '#2e7d32'
+                            : run.status === 'failed'
+                              ? '#c62828'
+                              : '#e65100',
                       }}
                     >
                       {run.status}
@@ -333,10 +408,7 @@ export const BenchmarkPage: React.FC = () => {
       {selectedRun && (
         <>
           {/* Summary cards */}
-          <div
-            className="card"
-            style={{ marginBottom: '1rem' }}
-          >
+          <div className="card" style={{ marginBottom: '1rem' }}>
             <h3 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>
               Condition Summary — {selectedRun.run.name}
             </h3>
@@ -369,9 +441,7 @@ export const BenchmarkPage: React.FC = () => {
 
           {/* Per-task results table */}
           <div className="card">
-            <h3 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>
-              Per-Task Results
-            </h3>
+            <h3 style={{ fontSize: '0.95rem', marginBottom: '0.75rem' }}>Per-Task Results</h3>
             <div style={{ overflowX: 'auto' }}>
               <ResultsTable results={selectedRun.results} />
             </div>
