@@ -1,104 +1,90 @@
-# Contributing to Project Loom
+# Contributing
 
-Thank you for your interest in contributing to Project Loom. This guide will help you get
-started.
+Loom is personal infrastructure. The short version of this document is:
 
-## Getting Started
+- **PRs are not reviewed.** Open one if it's useful to you; I won't be merging it.
+- **Issues are not answered.** If something breaks on your setup, it's a fork-level concern.
+- **Feature requests are not tracked.** If you want Loom to do something it doesn't, fork it.
+- **Installation and deployment support are not offered.** The install path is documented; if the docs are insufficient for you, your fork is the mechanism for fixing that.
 
-### Prerequisites
+See [PROJECT-STANCE.md](PROJECT-STANCE.md) for the full rationale. The license is MIT precisely so forks can evolve without talking to me.
+
+---
+
+## If you are forking: conventions the author follows
+
+These are not contribution requirements — they are the conventions I follow internally. Adopting them in your fork keeps the codebase consistent with upstream if you ever want to pull changes, but you are free to diverge.
+
+### Local development setup
 
 - **Rust** (stable, latest) — [rustup.rs](https://rustup.rs)
 - **Node.js** (v20+) and npm
 - **Docker** and Docker Compose
 - **cargo-nextest** — `cargo install cargo-nextest`
 - **cargo-tarpaulin** (optional, for coverage) — `cargo install cargo-tarpaulin`
-
-### Local Development Setup
+- **sqlx-cli** — `cargo install sqlx-cli --no-default-features --features postgres`
 
 ```bash
-# Clone the repository
 git clone https://github.com/technicalanxiety/project-loom.git
 cd project-loom
-
-# Copy environment config
 cp .env.example .env
-
-# Start all services
 docker-compose up -d
-
-# Install dashboard dependencies
 cd loom-dashboard && npm install && cd ..
-
-# Verify the engine builds
 cd loom-engine && cargo check && cd ..
 ```
 
-### Running Tests
+### Running tests
 
 ```bash
-# Rust unit tests
+# Rust unit tests (no database needed)
 cd loom-engine && cargo nextest run
 
-# Start test database for integration tests
+# Integration tests (database required)
 docker-compose -f docker-compose.test.yml up -d postgres-test
-
-# Run integration tests
 DATABASE_URL_TEST=postgres://loom_test:loom_test@localhost:5433/loom_test \
   cargo nextest run --profile integration
 
 # Dashboard tests
 cd loom-dashboard && npm test
-
-# Dashboard coverage
-npm run test:coverage
 ```
 
-## Development Workflow
-
-1. **Branch from main**: Create a feature branch (`feat/your-feature` or `fix/your-bug`).
-2. **Write code**: Follow the conventions below.
-3. **Write tests**: All new code must have tests. No exceptions.
-4. **Run checks**: `cargo clippy`, `cargo fmt --check`, `biome check` (dashboard).
-5. **Commit**: Use conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
-6. **Open a PR**: Describe what changed, what was tested, and any open questions.
-
-## Code Conventions
-
-### Rust (loom-engine)
+### Rust conventions
 
 - Functional style preferred. Pure functions, immutable data, composition.
 - All public items get `///` doc comments. Modules get `//!` docs.
 - Use `Result<T, E>` everywhere. No `unwrap()` in non-test code.
-- SQL queries use `sqlx::query!` / `sqlx::query_as!` for compile-time checking.
-- Parameterized queries only — never interpolate strings into SQL.
-- Keep files under ~300 lines.
+- SQL queries use parameterized statements via sqlx. Never interpolate strings into SQL.
+- Keep files under ~300 lines when practical; several current files exceed this.
+- Pre-commit: `cargo clippy -- -D warnings` and `cargo fmt --check`.
 
-### TypeScript (loom-dashboard)
+### TypeScript conventions (dashboard)
 
 - Functional React components only. No class components.
 - All exports get `/** JSDoc */` comments.
 - Named exports preferred over default exports.
-- API calls go through `src/api/client.ts` — no fetch in components.
-- Use Biome for linting and formatting: `npm run lint:fix`.
+- API calls go through `src/api/client.ts` — no `fetch` in components.
+- Biome for linting and formatting: `npm run lint:fix`.
 
-### SQL Migrations
+### SQL migration conventions
 
-- Sequential numbering: `NNN_description.sql`.
+- Sequential numbering: `NNN_description.sql`. Do not reuse numbers.
 - All tables prefixed with `loom_`.
 - Soft deletes via `deleted_at` column.
-- Comments explaining why tables/columns exist.
+- Comments explaining why tables/columns exist, not just what they do.
+- Additive migrations preferred. Destructive migrations require a clear narrative in the file header.
 
-## Architecture Decisions
+### Architecture Decisions
 
-Key design decisions are documented in `docs/adr/`. Read these before proposing
-architectural changes. If your contribution involves a design decision, add a new ADR.
+Key design decisions live in [docs/adr/](docs/adr/). Read them before changing architectural shape. If a fork makes a decision that diverges from upstream in a load-bearing way, add an ADR documenting the divergence so future-you can remember why.
 
-## Reporting Issues
+### Test corpus and private data
 
-- Use GitHub Issues for bugs and feature requests.
-- For security vulnerabilities, see [SECURITY.md](SECURITY.md).
+Private test corpora (real work-origin conversation content, personal seed documents) stay out of the public repository. The public test suite uses synthetic fixtures only. This is an operational rule — if you fork, you get to decide your own rule, but mixing the two in a public fork is a privacy failure waiting to happen.
+
+### Commit conventions
+
+Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`). Commit messages should explain the *why*; the diff already shows the *what*.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache-2.0
-license.
+MIT — see [LICENSE](LICENSE). Forks can relicense compatible derivatives; upstream stays MIT.

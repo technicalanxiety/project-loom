@@ -7,8 +7,10 @@ import { ConflictsPage } from './pages/ConflictsPage';
 import { EntitiesPage } from './pages/EntitiesPage';
 import { EntityDetailPage } from './pages/EntityDetailPage';
 import { HomePage } from './pages/HomePage';
+import { IngestionDistributionPage } from './pages/IngestionDistributionPage';
 import { MetricsPage } from './pages/MetricsPage';
 import { PackDetailPage } from './pages/PackDetailPage';
+import { ParserHealthPage } from './pages/ParserHealthPage';
 import { PredicatesPage } from './pages/PredicatesPage';
 
 /** Root application component with sidebar navigation and route definitions. */
@@ -38,6 +40,10 @@ function App() {
             <div className="nav-section">Insights</div>
             <NavLink to="/metrics">Metrics</NavLink>
             <NavLink to="/benchmarks">Benchmarks</NavLink>
+
+            <div className="nav-section">Ingestion</div>
+            <NavLink to="/ingestion/distribution">Distribution</NavLink>
+            <NavLink to="/ingestion/parsers">Parser Health</NavLink>
           </nav>
         </aside>
 
@@ -53,6 +59,8 @@ function App() {
             <Route path="/predicates/packs/:pack" element={<PackDetailPage />} />
             <Route path="/metrics" element={<MetricsPage />} />
             <Route path="/benchmarks" element={<BenchmarkPage />} />
+            <Route path="/ingestion/parsers" element={<ParserHealthPage />} />
+            <Route path="/ingestion/distribution" element={<IngestionDistributionPage />} />
           </Routes>
         </main>
       </div>

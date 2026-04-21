@@ -33,6 +33,7 @@ use crate::pipeline::online::retrieve::{
 };
 use crate::types::classification::TaskClass;
 use crate::types::compilation::{CompiledPackage, OutputFormat};
+use crate::types::ingestion::IngestionMode;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -136,6 +137,28 @@ pub struct SelectedItem {
     pub provenance: f64,
     /// Final composite score.
     pub final_score: f64,
+    /// Effective ingestion mode for the candidate (serde snake_case when
+    /// present). Mirrors `RetrievalCandidate::provenance_mode`.
+    pub ingestion_mode: Option<IngestionMode>,
+    /// True when the item's only provenance is `user_authored_seed` — no
+    /// live or vendor corroboration. Per ADR 004, surfaced in compiled
+    /// output so downstream readers can decide whether to trust the content
+    /// or verify against source.
+    pub sole_source: Option<bool>,
+}
+
+/// Compute the `sole_source` flag for a retrieval candidate.
+///
+/// Returns `Some(true)` when the candidate's effective ingestion mode is
+/// `user_authored_seed` — by construction the retrieval stage picks the
+/// highest-authority mode across source episodes, so seeing seed here means
+/// no live or vendor corroboration exists. Returns `Some(false)` when the
+/// candidate has live or vendor evidence, and `None` when mode metadata is
+/// absent (synthetic or test candidates).
+pub fn compute_sole_source(candidate: &RetrievalCandidate) -> Option<bool> {
+    candidate
+        .provenance_mode
+        .map(|m| m == IngestionMode::UserAuthoredSeed)
 }
 
 /// Metadata about a rejected candidate for audit logging.
@@ -331,6 +354,8 @@ pub fn compile_package(input: CompilationInput) -> CompilationResult {
             stability: rc.scores.stability,
             provenance: rc.scores.provenance,
             final_score: rc.final_score,
+            ingestion_mode: rc.candidate.provenance_mode,
+            sole_source: compute_sole_source(&rc.candidate),
         })
         .collect();
 
@@ -418,7 +443,10 @@ pub fn format_structured(
     let mut identity = String::new();
     let mut project = String::new();
 
-    // Collect hot tier items.
+    // Collect hot tier items. Hot-tier items lack retrieval-stage mode
+    // metadata (they are inserted from a separate hot-tier query that does
+    // not join loom_episodes), so sole_source is emitted as `None` and the
+    // attribute is omitted on their fact elements.
     for item in hot_items {
         match &item.payload {
             HotTierPayload::Fact(f) => {
@@ -429,6 +457,7 @@ pub fn format_structured(
                     &f.evidence,
                     f.observed.as_deref(),
                     &f.source,
+                    None,
                 ));
             }
             HotTierPayload::Entity(e) => {
@@ -453,6 +482,8 @@ pub fn format_structured(
 
     // Collect warm tier candidates.
     for rc in warm_candidates {
+        let sole_source = compute_sole_source(&rc.candidate);
+        let mode = rc.candidate.provenance_mode;
         match &rc.candidate.payload {
             CandidatePayload::Fact(f) => {
                 facts.push(format_structured_fact(
@@ -462,6 +493,7 @@ pub fn format_structured(
                     &f.evidence_status,
                     None,
                     &format_source_episodes(&f.source_episodes),
+                    sole_source,
                 ));
             }
             CandidatePayload::Episode(ep) => {
@@ -470,6 +502,7 @@ pub fn format_structured(
                     &ep.source,
                     &rc.candidate.id,
                     &ep.content,
+                    mode,
                 ));
             }
             CandidatePayload::Graph(g) => {
@@ -481,6 +514,7 @@ pub fn format_structured(
                         "graph",
                         None,
                         &g.entity_id.to_string(),
+                        sole_source,
                     ));
                 }
             }
@@ -552,6 +586,9 @@ pub fn format_structured(
 }
 
 /// Format a single fact as an XML self-closing tag.
+///
+/// `sole_source` is serialized as `sole_source="true|false"` when `Some`,
+/// and omitted when `None` (hot-tier facts and synthetic inputs).
 fn format_structured_fact(
     subject: &str,
     predicate: &str,
@@ -559,35 +596,51 @@ fn format_structured_fact(
     evidence: &str,
     observed: Option<&str>,
     source: &str,
+    sole_source: Option<bool>,
 ) -> String {
     let observed_attr = match observed {
         Some(d) => format!(" observed=\"{}\"", xml_escape(d)),
         None => String::new(),
     };
+    let sole_source_attr = match sole_source {
+        Some(b) => format!(" sole_source=\"{b}\""),
+        None => String::new(),
+    };
     format!(
-        "<fact subject=\"{}\" predicate=\"{}\" object=\"{}\" evidence=\"{}\"{} source=\"{}\"/>",
+        "<fact subject=\"{}\" predicate=\"{}\" object=\"{}\" evidence=\"{}\"{} source=\"{}\"{}/>",
         xml_escape(subject),
         xml_escape(predicate),
         xml_escape(object),
         xml_escape(evidence),
         observed_attr,
         xml_escape(source),
+        sole_source_attr,
     )
 }
 
 /// Format a single episode as an XML element.
+///
+/// Emits `mode="<ingestion_mode>"` when the effective mode is known, so
+/// readers can see per-episode provenance alongside the facts derived from
+/// it. Omitted when `None` (synthetic candidates in tests).
 fn format_structured_episode(
     occurred_at: &DateTime<Utc>,
     source: &str,
     id: &Uuid,
     content: &str,
+    mode: Option<IngestionMode>,
 ) -> String {
     let date = occurred_at.format("%Y-%m-%d").to_string();
+    let mode_attr = match mode {
+        Some(m) => format!(" mode=\"{m}\""),
+        None => String::new(),
+    };
     format!(
-        "<episode date=\"{}\" source=\"{}\" id=\"{}\">{}</episode>",
+        "<episode date=\"{}\" source=\"{}\" id=\"{}\"{}>{}</episode>",
         xml_escape(&date),
         xml_escape(source),
         id,
+        mode_attr,
         xml_escape(content),
     )
 }
@@ -675,7 +728,8 @@ pub fn format_compact(
     let mut patterns: Vec<serde_json::Value> = Vec::new();
     let mut identity = String::new();
 
-    // Collect hot tier items.
+    // Collect hot tier items. Hot-tier content has no retrieval-stage
+    // provenance metadata; `sole_source` is omitted from those facts.
     for item in hot_items {
         match &item.payload {
             HotTierPayload::Fact(f) => {
@@ -705,34 +759,50 @@ pub fn format_compact(
         }
     }
 
-    // Collect warm tier candidates.
+    // Collect warm tier candidates. `sole_source` is present on every fact
+    // whose candidate carries a known ingestion mode (true when seed-only,
+    // false when live or vendor evidence exists).
     for rc in warm_candidates {
+        let sole_source = compute_sole_source(&rc.candidate);
+        let mode = rc.candidate.provenance_mode;
         match &rc.candidate.payload {
             CandidatePayload::Fact(f) => {
-                facts.push(serde_json::json!({
+                let mut obj = serde_json::json!({
                     "s": f.subject_id.to_string(),
                     "p": f.predicate,
                     "o": f.object_id.to_string(),
                     "e": f.evidence_status,
                     "t": "",
-                }));
+                });
+                if let Some(b) = sole_source {
+                    obj["sole_source"] = serde_json::Value::Bool(b);
+                }
+                facts.push(obj);
             }
             CandidatePayload::Episode(ep) => {
-                recent.push(serde_json::json!({
+                let mut obj = serde_json::json!({
                     "date": ep.occurred_at.format("%Y-%m-%d").to_string(),
                     "src": ep.source,
                     "text": ep.content,
-                }));
+                });
+                if let Some(m) = mode {
+                    obj["mode"] = serde_json::Value::String(m.to_string());
+                }
+                recent.push(obj);
             }
             CandidatePayload::Graph(g) => {
                 if let Some(pred) = &g.predicate {
-                    facts.push(serde_json::json!({
+                    let mut obj = serde_json::json!({
                         "s": g.entity_name,
                         "p": pred,
                         "o": g.entity_type,
                         "e": "graph",
                         "t": "",
-                    }));
+                    });
+                    if let Some(b) = sole_source {
+                        obj["sole_source"] = serde_json::Value::Bool(b);
+                    }
+                    facts.push(obj);
                 }
             }
             CandidatePayload::Procedure(p) => {
@@ -893,6 +963,7 @@ mod tests {
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,
@@ -918,6 +989,7 @@ mod tests {
                 occurred_at: Utc::now(),
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,
@@ -943,6 +1015,7 @@ mod tests {
                 observation_count: 7,
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,

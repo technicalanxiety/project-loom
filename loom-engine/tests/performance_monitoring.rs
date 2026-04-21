@@ -42,6 +42,7 @@ fn make_fact_candidate(score: f64) -> RetrievalCandidate {
             source_episodes: vec![Uuid::new_v4()],
             namespace: "test".to_string(),
         }),
+        provenance_mode: None,
     }
 }
 
@@ -57,6 +58,7 @@ fn make_episode_candidate(score: f64) -> RetrievalCandidate {
             occurred_at: Utc::now(),
             namespace: "test".to_string(),
         }),
+        provenance_mode: None,
     }
 }
 

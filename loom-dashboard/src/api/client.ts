@@ -200,6 +200,16 @@ export async function getHotTierMetrics(): Promise<HotTierMetrics> {
   return fetchJson<HotTierMetrics>('/metrics/hot-tier');
 }
 
+/** Fetch bootstrap parser health metrics. */
+export async function getParserHealthMetrics(): Promise<ParserHealthMetrics> {
+  return fetchJson<ParserHealthMetrics>('/metrics/parser-health');
+}
+
+/** Fetch ingestion-mode distribution per namespace. */
+export async function getIngestionDistributionMetrics(): Promise<IngestionDistributionMetrics> {
+  return fetchJson<IngestionDistributionMetrics>('/metrics/ingestion-distribution');
+}
+
 // ---------------------------------------------------------------------------
 // POST endpoints (mutations)
 // ---------------------------------------------------------------------------

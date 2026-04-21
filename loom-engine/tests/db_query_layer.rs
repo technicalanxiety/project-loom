@@ -68,6 +68,9 @@ mod episode_idempotency {
             namespace: "test-ns".to_string(),
             metadata: None,
             participants: None,
+            ingestion_mode: "live_mcp_capture".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
         };
 
         // Use the pool directly (insert_episode takes &PgPool).
@@ -85,6 +88,9 @@ mod episode_idempotency {
             namespace: "test-ns".to_string(),
             metadata: None,
             participants: None,
+            ingestion_mode: "live_mcp_capture".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
         };
 
         let second = insert_episode(&pool, &ep2).await.expect("second insert");
@@ -113,6 +119,9 @@ mod episode_idempotency {
             namespace: "test-ns".to_string(),
             metadata: None,
             participants: None,
+            ingestion_mode: "live_mcp_capture".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
         };
 
         let ep2 = NewEpisode {
@@ -125,6 +134,9 @@ mod episode_idempotency {
             namespace: "test-ns".to_string(),
             metadata: None,
             participants: None,
+            ingestion_mode: "live_mcp_capture".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
         };
 
         let first = insert_episode(&pool, &ep1).await.expect("first insert");
@@ -585,6 +597,9 @@ mod soft_deletion_filtering {
             namespace: ns.clone(),
             metadata: None,
             participants: None,
+            ingestion_mode: "live_mcp_capture".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
         };
 
         let inserted = insert_episode(&pool, &ep).await.expect("insert episode");

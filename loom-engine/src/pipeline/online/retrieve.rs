@@ -35,6 +35,7 @@ use uuid::Uuid;
 
 use crate::db::traverse::TraversalResult;
 use crate::types::classification::TaskClass;
+use crate::types::ingestion::IngestionMode;
 
 // ---------------------------------------------------------------------------
 // Retrieval profile enum
@@ -231,6 +232,16 @@ pub struct RetrievalCandidate {
     pub memory_type: MemoryType,
     /// Profile-specific payload.
     pub payload: CandidatePayload,
+    /// Effective ingestion mode for ranking's provenance coefficient.
+    ///
+    /// For episode candidates this is the episode's own mode. For fact
+    /// candidates it is the highest-authority mode across the fact's
+    /// `source_episodes` (live_mcp_capture > user_authored_seed >
+    /// vendor_import). `None` is treated as neutral (no coefficient
+    /// modulation) in the ranker; real-data rows always populate it,
+    /// so `None` only appears in test fixtures or synthetic candidates.
+    #[serde(default)]
+    pub provenance_mode: Option<IngestionMode>,
 }
 
 /// Profile-specific data carried by a [`RetrievalCandidate`].
@@ -336,14 +347,30 @@ pub async fn execute_fact_lookup(
 ) -> Result<Vec<RetrievalCandidate>, RetrievalError> {
     // Retrieve facts ranked by embedding similarity on fact_state.
     // We join loom_facts with loom_fact_state for the embedding, and with
-    // loom_entities (subject + object) to enable entity-name boosting.
+    // loom_entities (subject + object) to enable entity-name boosting. We
+    // also compute the best ingestion_mode across the fact's source_episodes
+    // — "best" meaning most authoritative per ADR 004 — so Stage 5 ranking
+    // can apply the provenance coefficient without a second round-trip.
     let rows = sqlx::query_as::<_, FactWithScore>(
         r#"
         SELECT f.id, f.subject_id, f.predicate, f.object_id,
                f.evidence_status, f.source_episodes, f.namespace,
                1.0 - (fs.embedding <=> $1::vector) AS similarity,
                subj.name AS subject_name,
-               obj.name AS object_name
+               obj.name AS object_name,
+               (
+                 SELECT e.ingestion_mode
+                 FROM loom_episodes e
+                 WHERE e.id = ANY(f.source_episodes)
+                   AND e.deleted_at IS NULL
+                 ORDER BY CASE e.ingestion_mode
+                   WHEN 'live_mcp_capture'   THEN 1
+                   WHEN 'user_authored_seed' THEN 2
+                   WHEN 'vendor_import'      THEN 3
+                   ELSE 4
+                 END
+                 LIMIT 1
+               ) AS best_ingestion_mode
         FROM loom_facts f
         JOIN loom_fact_state fs ON fs.fact_id = f.id
         JOIN loom_entities subj ON subj.id = f.subject_id
@@ -374,6 +401,11 @@ pub async fn execute_fact_lookup(
             );
             let score = (base_score + name_boost).min(1.0);
 
+            let provenance_mode = row
+                .best_ingestion_mode
+                .as_deref()
+                .and_then(|s| s.parse::<IngestionMode>().ok());
+
             RetrievalCandidate {
                 id: row.id,
                 score,
@@ -387,6 +419,7 @@ pub async fn execute_fact_lookup(
                     source_episodes: row.source_episodes,
                     namespace: row.namespace,
                 }),
+                provenance_mode,
             }
         })
         .collect();
@@ -432,6 +465,9 @@ struct FactWithScore {
     similarity: f64,
     subject_name: String,
     object_name: String,
+    /// Highest-authority ingestion_mode across source_episodes,
+    /// ordered `live_mcp_capture > user_authored_seed > vendor_import`.
+    best_ingestion_mode: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +496,7 @@ pub async fn execute_episode_recall(
 ) -> Result<Vec<RetrievalCandidate>, RetrievalError> {
     let rows = sqlx::query_as::<_, EpisodeWithScore>(
         r#"
-        SELECT id, source, content, occurred_at, namespace,
+        SELECT id, source, content, occurred_at, namespace, ingestion_mode,
                1.0 - (embedding <=> $1::vector) AS similarity
         FROM loom_episodes
         WHERE namespace = $2
@@ -485,6 +521,8 @@ pub async fn execute_episode_recall(
             // Blend: 70% similarity + 30% recency.
             let score = (similarity * 0.7 + recency * 0.3).min(1.0);
 
+            let provenance_mode = row.ingestion_mode.parse::<IngestionMode>().ok();
+
             RetrievalCandidate {
                 id: row.id,
                 score,
@@ -496,6 +534,7 @@ pub async fn execute_episode_recall(
                     occurred_at: row.occurred_at,
                     namespace: row.namespace,
                 }),
+                provenance_mode,
             }
         })
         .collect();
@@ -524,6 +563,7 @@ struct EpisodeWithScore {
     content: String,
     occurred_at: chrono::DateTime<Utc>,
     namespace: String,
+    ingestion_mode: String,
     similarity: f64,
 }
 
@@ -608,6 +648,10 @@ pub async fn execute_graph_neighborhood(
                     predicate: r.predicate,
                     hop_depth: r.hop_depth,
                 }),
+                // Graph candidates are derived from entities, not episodes;
+                // there is no single source episode to read a mode from.
+                // Ranking falls back to the neutral default (no modulation).
+                provenance_mode: None,
             }
         })
         .collect();
@@ -735,6 +779,10 @@ pub async fn execute_procedure_assist(
                     observation_count: row.observation_count.unwrap_or(0),
                     namespace: row.namespace,
                 }),
+                // Procedures are aggregates across many observations; there
+                // is no single canonical ingestion mode. Ranking treats this
+                // as neutral (no coefficient modulation).
+                provenance_mode: None,
             }
         })
         .collect();
@@ -1333,6 +1381,7 @@ mod tests {
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
@@ -1357,6 +1406,7 @@ mod tests {
                 occurred_at: Utc::now(),
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
@@ -1381,6 +1431,7 @@ mod tests {
                 predicate: Some("uses".to_string()),
                 hop_depth: 1,
             }),
+            provenance_mode: None,
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
@@ -1402,6 +1453,7 @@ mod tests {
                 observation_count: 5,
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");

@@ -42,6 +42,17 @@ pub struct Episode {
     pub classification_model: Option<String>,
     /// Per-episode extraction statistics (JSONB).
     pub extraction_metrics: Option<serde_json::Value>,
+    /// Ingestion provenance class: `user_authored_seed`, `vendor_import`, or
+    /// `live_mcp_capture`. Enforced by CHECK constraint in migration 015.
+    /// Stored as String for row mapping; cross-reference [`crate::types::ingestion::IngestionMode`]
+    /// for the typed enum used at API and ranking boundaries.
+    pub ingestion_mode: String,
+    /// Semantic version of the parser that produced this episode. Populated
+    /// only when `ingestion_mode = 'vendor_import'`.
+    pub parser_version: Option<String>,
+    /// Vendor export schema version asserted against during parsing. Populated
+    /// only when `ingestion_mode = 'vendor_import'`.
+    pub parser_source_schema: Option<String>,
     /// 768-dimension embedding from nomic-embed-text.
     #[serde(skip)]
     pub embedding: Option<pgvector::Vector>,

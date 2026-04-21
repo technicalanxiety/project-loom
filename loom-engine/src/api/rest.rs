@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::db::episodes::{self, NewEpisode};
+use crate::types::ingestion::IngestionMode;
 use crate::types::mcp::{LearnRequest, LearnResponse};
 
 use super::mcp::AppState;
@@ -92,15 +93,30 @@ fn compute_content_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+
 // ---------------------------------------------------------------------------
 // POST /api/learn
 // ---------------------------------------------------------------------------
 
-/// Handle `POST /api/learn` — manual episode submission.
+/// Handle `POST /api/learn` — direct episode submission.
 ///
-/// Accepts the same [`LearnRequest`] body as `loom_learn` but always sets
-/// `source = "manual"`, ignoring whatever the caller provided. Requires
-/// `content` and `namespace`; `occurred_at` defaults to now if omitted.
+/// Accepts the same [`LearnRequest`] body as `loom_learn`. Unlike the MCP
+/// handler, REST does not hardcode `ingestion_mode`: the caller must supply
+/// one of the three valid modes and is trusted to match it to reality
+/// (bootstrap scripts send `vendor_import`, the CLI seed tool sends
+/// `user_authored_seed`, the Claude Code PostSession hook sends
+/// `live_mcp_capture`).
+///
+/// Source is read from the request — REST no longer overrides it — so each
+/// caller tags its own episodes (e.g. `"claude-code"` from the hook,
+/// `"claude_ai_parser"` from bootstrap, `"seed"` from the CLI).
+///
+/// # Validation
+///
+/// * `content`, `source`, `namespace` must be non-empty.
+/// * `ingestion_mode` is required (serde enforces the enum).
+/// * `ingestion_mode = vendor_import` requires non-empty `parser_version`
+///   and `parser_source_schema`. Other modes must omit both.
 ///
 /// # Idempotency
 ///
@@ -113,18 +129,38 @@ fn compute_content_hash(content: &str) -> String {
 /// `"duplicate"`.
 pub async fn handle_api_learn(
     State(state): State<AppState>,
-    Json(mut req): Json<LearnRequest>,
+    Json(req): Json<LearnRequest>,
 ) -> Result<Json<LearnResponse>, RestError> {
-    // Force source to "manual" regardless of what the caller sent.
-    req.source = "manual".to_string();
-
     // Validate required fields.
     if req.content.trim().is_empty() {
         return Err(RestError::InvalidRequest("content must not be empty".into()));
     }
+    if req.source.trim().is_empty() {
+        return Err(RestError::InvalidRequest("source must not be empty".into()));
+    }
     if req.namespace.trim().is_empty() {
         return Err(RestError::InvalidRequest("namespace must not be empty".into()));
     }
+
+    // REST callers must supply ingestion_mode explicitly. MCP is the only
+    // surface that omits it (the MCP handler hardcodes `live_mcp_capture`).
+    let ingestion_mode = req.ingestion_mode.ok_or_else(|| {
+        RestError::InvalidRequest(
+            "ingestion_mode is required (one of user_authored_seed, \
+             vendor_import, live_mcp_capture)"
+                .into(),
+        )
+    })?;
+
+    // Parser-metadata coupling to ingestion_mode. Mirrors the database
+    // constraint chk_parser_fields_vendor_import so the API rejects early
+    // with a clearer error than the Postgres CHECK would produce.
+    crate::types::ingestion::validate_parser_fields(
+        ingestion_mode,
+        req.parser_version.as_deref(),
+        req.parser_source_schema.as_deref(),
+    )
+    .map_err(RestError::InvalidRequest)?;
 
     let content_hash = compute_content_hash(&req.content);
     let occurred_at = req.occurred_at.unwrap_or_else(chrono::Utc::now);
@@ -153,7 +189,7 @@ pub async fn handle_api_learn(
 
     // Insert episode — insert_episode handles (source, source_event_id) dedup.
     let new_ep = NewEpisode {
-        source: "manual".to_string(),
+        source: req.source.clone(),
         source_id: None,
         source_event_id: req.source_event_id.clone(),
         content: req.content.clone(),
@@ -162,6 +198,9 @@ pub async fn handle_api_learn(
         namespace: req.namespace.clone(),
         metadata: req.metadata.clone(),
         participants: req.participants.clone(),
+        ingestion_mode: ingestion_mode.to_string(),
+        parser_version: req.parser_version.clone(),
+        parser_source_schema: req.parser_source_schema.clone(),
     };
 
     let episode = episodes::insert_episode(&state.pools.offline, &new_ep)
@@ -340,6 +379,11 @@ pub async fn handle_github_webhook(
     }
 
     // Insert episode — insert_episode handles (source, source_event_id) dedup.
+    // GitHub webhooks are verbatim real-time capture of external events,
+    // which matches the live-capture semantic even though no MCP client is
+    // involved. The taxonomy has three slots and "vendor import" (historical
+    // backfill) and "user authored seed" do not fit; live capture is the
+    // correct classification.
     let new_ep = NewEpisode {
         source: "github".to_string(),
         source_id: None,
@@ -350,6 +394,9 @@ pub async fn handle_github_webhook(
         namespace: namespace.clone(),
         metadata: Some(metadata),
         participants: Some(participants),
+        ingestion_mode: IngestionMode::LiveMcpCapture.to_string(),
+        parser_version: None,
+        parser_source_schema: None,
     };
 
     let episode = episodes::insert_episode(&state.pools.offline, &new_ep)

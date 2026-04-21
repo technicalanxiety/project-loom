@@ -627,6 +627,7 @@ mod hard_exclusion_by_weight {
             source_profile: profile,
             memory_type,
             payload,
+            provenance_mode: None,
         }
     }
 
@@ -788,6 +789,7 @@ mod four_dimension_weighted_ranking {
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         WeightedCandidate {
             candidate,
@@ -1336,6 +1338,7 @@ mod candidate_deduplication {
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,
@@ -1704,6 +1707,7 @@ mod output_format_correctness {
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,
@@ -1730,6 +1734,7 @@ mod output_format_correctness {
                 occurred_at: chrono::Utc::now(),
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,
@@ -1756,6 +1761,7 @@ mod output_format_correctness {
                 observation_count: 7,
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         RankedCandidate {
             candidate,

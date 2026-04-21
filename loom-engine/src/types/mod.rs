@@ -10,5 +10,6 @@ pub mod compilation;
 pub mod entity;
 pub mod episode;
 pub mod fact;
+pub mod ingestion;
 pub mod mcp;
 pub mod predicate;

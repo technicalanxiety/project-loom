@@ -42,6 +42,7 @@ use crate::pipeline::online::{
 };
 use crate::types::classification::TaskClass;
 use crate::types::compilation::OutputFormat;
+use crate::types::ingestion::IngestionMode;
 use crate::types::mcp::{
     LearnRequest, LearnResponse, RecallRequest, RecallResponse, ThinkRequest, ThinkResponse,
 };
@@ -134,8 +135,17 @@ pub fn compute_content_hash(content: &str) -> String {
 #[tracing::instrument(skip(state, req), fields(endpoint = "loom_learn"))]
 pub async fn handle_loom_learn(
     State(state): State<AppState>,
-    Json(req): Json<LearnRequest>,
+    Json(mut req): Json<LearnRequest>,
 ) -> Result<Json<LearnResponse>, McpError> {
+    // MCP boundary: hardcode ingestion_mode and reject vendor-import metadata.
+    // Whatever the client sent is overwritten here. This is the architectural
+    // enforcement point per ADR 004 — clients cannot claim any other mode
+    // through the MCP surface.
+    let ingestion_mode = IngestionMode::LiveMcpCapture;
+    req.ingestion_mode = Some(ingestion_mode);
+    req.parser_version = None;
+    req.parser_source_schema = None;
+
     // Validate required fields.
     if req.content.trim().is_empty() {
         return Err(McpError::InvalidRequest("content must not be empty".into()));
@@ -183,6 +193,9 @@ pub async fn handle_loom_learn(
         namespace: req.namespace.clone(),
         metadata: req.metadata.clone(),
         participants: req.participants.clone(),
+        ingestion_mode: ingestion_mode.to_string(),
+        parser_version: None,
+        parser_source_schema: None,
     };
 
     let episode = episodes::insert_episode(&state.pools.offline, &new_ep)

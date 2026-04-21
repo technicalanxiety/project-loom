@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::db::episodes::{self, EpisodeError, NewEpisode};
 use crate::types::episode::Episode;
+use crate::types::ingestion::IngestionMode;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -154,9 +155,18 @@ pub async fn ingest_episode(
     occurred_at: chrono::DateTime<chrono::Utc>,
     metadata: Option<serde_json::Value>,
     participants: Option<Vec<String>>,
+    ingestion_mode: IngestionMode,
+    parser_version: Option<String>,
+    parser_source_schema: Option<String>,
 ) -> Result<IngestResult, IngestError> {
     // Step 1: Validate input.
     validate_episode_input(content, source, namespace)?;
+    crate::types::ingestion::validate_parser_fields(
+        ingestion_mode,
+        parser_version.as_deref(),
+        parser_source_schema.as_deref(),
+    )
+    .map_err(IngestError::InvalidData)?;
 
     let content_hash = compute_content_hash(content);
 
@@ -192,6 +202,9 @@ pub async fn ingest_episode(
         namespace: namespace.to_string(),
         metadata,
         participants,
+        ingestion_mode: ingestion_mode.to_string(),
+        parser_version,
+        parser_source_schema,
     };
 
     match episodes::insert_episode(pool, &new_ep).await {

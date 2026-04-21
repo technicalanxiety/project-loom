@@ -126,6 +126,14 @@ async fn main() {
         .route("/dashboard/api/metrics/extraction", get(dashboard::handle_metrics_extraction))
         .route("/dashboard/api/metrics/classification", get(dashboard::handle_metrics_classification))
         .route("/dashboard/api/metrics/hot-tier", get(dashboard::handle_metrics_hot_tier))
+        .route(
+            "/dashboard/api/metrics/parser-health",
+            get(dashboard::handle_metrics_parser_health),
+        )
+        .route(
+            "/dashboard/api/metrics/ingestion-distribution",
+            get(dashboard::handle_metrics_ingestion_distribution),
+        )
         .route("/dashboard/api/conflicts/:id/resolve", post(dashboard::handle_resolve_conflict))
         .route("/dashboard/api/predicates/candidates/:id/resolve", post(dashboard::handle_resolve_predicate_candidate))
         .route("/dashboard/api/benchmarks", get(dashboard::handle_benchmark_runs))

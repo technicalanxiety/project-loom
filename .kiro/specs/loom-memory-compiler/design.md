@@ -19,6 +19,68 @@ Key design principles:
 - Comprehensive audit logging for every compilation decision
 - Local-first LLM inference via Ollama with Azure OpenAI as fallback only
 - Compile-time checked SQL queries via sqlx, strict JSON deserialization via serde
+- Episodes are raw evidence — their `content` is verbatim and never LLM-generated (see Episode Content Invariants below)
+
+## Episode Content Invariants
+
+Episodes are raw evidence. The authority hierarchy (Episodes > Facts > Procedures) depends on episodes being the verbatim record of something that actually happened. Facts derive from episodes. Procedures derive from episodes. Compilation pulls from episodes. If episode content is itself the output of an LLM inference step (summarization, paraphrase, reconstruction), every derivation downstream builds on fabricated primary evidence.
+
+The `content` field of every episode MUST be one of:
+
+- A verbatim transcript or transcript excerpt from a conversation (Mode 3 live capture).
+- A verbatim excerpt from a vendor export (Mode 2 bootstrap import).
+- Human-authored prose written by a user for the purpose of seeding Loom (Mode 1 seed).
+
+The `content` field MUST NEVER be the output of an LLM summarization, rewriting, or inference step.
+
+This is a hard invariant. Violating it breaks the authority hierarchy at the root. The invariant cannot be enforced at runtime because LLM-generated text is not reliably detectable post-hoc. Enforcement lives in three places:
+
+1. The `loom_learn` MCP tool contract, documented as "pass raw content only." The MCP server hardcodes `ingestion_mode = live_mcp_capture` at the boundary, so clients cannot launder LLM-reconstructed content through a mode claim. The `templates/CLAUDE.md` and `templates/claude_desktop_projects_instructions.md` files shipped with Loom tell models to pass verbatim user-pointed content only.
+2. The `templates/loom-capture.sh` PostSession hook reads raw session JSONL and posts it verbatim — no inference step between disk and `/api/learn`.
+3. User discipline, documented in the user guide and surfaced in the dashboard onboarding flow.
+
+The `ingestion_mode` field does not enforce this invariant on its own. A client could claim `live_mcp_capture` while passing summarized content. That is a client-side violation Loom cannot detect or correct. The contract is trust-based, documented in bold, and audited by user reading of their own episode content. See `docs/adr/005-verbatim-content-invariant.md`.
+
+## Ingestion Model
+
+Loom has three ingestion modes. Every episode enters through exactly one mode, recorded on the row in the `ingestion_mode` column (CHECK constraint enforces the enum).
+
+### Mode 1 — User-authored seed (`user_authored_seed`)
+
+User writes prose describing their domain, patterns, recurring context, people, projects, decisions. Markdown documents per namespace. Ingested via the `cli/loom-seed.py` tool, which POSTs each document to `/api/learn` with `ingestion_mode = user_authored_seed`. Claude or another model MAY assist with drafting through interview-style prompting, but the user is the author and approves the content before ingestion — the model is scribe, not source.
+
+Ranking coefficient: **0.8**. Authoritative but unverified against live observation.
+
+### Mode 2 — Vendor export import (`vendor_import`)
+
+Parsed content from vendor exports: Claude.ai account export, Claude Code JSONL, ChatGPT export, Codex CLI rollouts. Ingested via `bootstrap/*.py` scripts that POST to `/api/learn` with `ingestion_mode = vendor_import` plus `parser_version` and `parser_source_schema` metadata. Each parser asserts a pinned schema and fails loud on drift — no partial ingestion, no best-effort fallback.
+
+Ranking coefficient: **0.6**. Acknowledged as potentially incomplete per export fidelity.
+
+### Mode 3 — Live MCP capture (`live_mcp_capture`)
+
+Real-time verbatim capture via MCP-aware clients. The `loom_learn` tool forces `ingestion_mode = live_mcp_capture` at the MCP server boundary — clients do not get to set or override this field. Exhaustive capture is additionally possible via the `templates/loom-capture.sh` PostSession hook for Claude Code, which posts raw session JSONL directly to `/api/learn` with the same mode.
+
+Ranking coefficient: **1.0**. Ground truth; one live-captured source episode is sufficient for a fact to rank at full provenance.
+
+### Capture fidelity by surface
+
+Capture fidelity varies by surface. This is a property of the client, not of Loom.
+
+| Surface | Fidelity | Mechanism |
+|---|---|---|
+| Claude Code | Exhaustive | PostSession hook reads raw JSONL from `~/.claude/projects/`, posts full transcript |
+| Claude Desktop | Selective | MCP `loom_learn` with verbatim user-pointed content |
+| Codex CLI | Exhaustive | Session rollout file watcher (same pattern as Claude Code) |
+| ChatGPT Desktop | Selective | MCP `loom_learn` (when/if MCP is supported) |
+| Claude.ai web, mobile | None | Mode 1 and Mode 2 only |
+
+Exhaustive capture means every session is ingested in full, automatically, without model judgment about what matters. Selective capture means the user explicitly points at content and the model invokes `loom_learn` with the verbatim text. Both are legitimate Mode 3 capture with different guarantees. See `docs/adr/004-ingestion-modes.md` for the full rationale.
+
+### The rejected fourth mode
+
+There is no `llm_reconstruction` mode. That path is rejected architecturally. Its absence is not an oversight to be fixed later — it is the load-bearing protection against the LLM reconstruction trap described in the Episode Content Invariants section. No future migration will add it.
+
 
 ## Architecture
 
@@ -532,9 +594,22 @@ Scores candidates on four interpretable dimensions with explicit weights:
 | **Relevance** | 0.40 | Vector similarity to query, entity name matching, modified by memory weight |
 | **Recency** | 0.25 | Time-based decay from occurred_at or valid_from timestamps |
 | **Stability** | 0.20 | Current status (non-superseded), evidence_status authority, salience score |
-| **Provenance** | 0.15 | Source episode count, evidence_status authority (user_asserted > observed > extracted > inferred) |
+| **Provenance** | 0.15 | (Source episode count × evidence_status authority) × ingestion_mode coefficient |
 
 Each dimension scored 0.0-1.0. Final score = (relevance × 0.40) + (recency × 0.25) + (stability × 0.20) + (provenance × 0.15). Candidates sorted by final score descending.
+
+**Provenance coefficient lookup** (multiplies the intrinsic provenance score):
+
+| Effective ingestion mode | Coefficient |
+|--------------------------|-------------|
+| `live_mcp_capture` | 1.0 |
+| `user_authored_seed` | 0.8 |
+| `vendor_import` | 0.6 |
+| Unknown (synthetic / hot-tier items) | 1.0 (neutral) |
+
+For an episode candidate, the effective mode is the episode's own `ingestion_mode`. For a fact candidate, the effective mode is the **MAX** across all `source_episodes` using the authority ordering `live_mcp_capture > user_authored_seed > vendor_import`. A fact supported by at least one live-captured episode gets the full 1.0 coefficient regardless of what other episodes support it — this is intentional: a live-captured episode is ground truth, and one is sufficient.
+
+The retrieval query pre-computes the MAX mode and returns it on the `RetrievalCandidate.provenance_mode` field so the ranker does not need a second database round-trip.
 
 ### Context Package Compiler
 
@@ -544,8 +619,12 @@ Assembles ranked candidates into structured context packages:
 1. Inject all hot tier memory for namespace (always included)
 2. Add warm tier candidates up to token budget
 3. Format by output format (structured or compact)
-4. Include provenance information for each item
+4. Include provenance information for each item, including the `sole_source` flag on facts and `mode` attribute on episodes
 5. Compute total token count
+
+**Sole-source flag.** For each compiled fact whose effective ingestion mode is known, emit `sole_source = true` when that mode is `user_authored_seed` (no live or vendor corroboration exists) and `sole_source = false` otherwise. For hot-tier items whose mode is not known at compile time, omit the attribute rather than defaulting to either boolean. This is the only defense downstream readers have against the "seeded but never corroborated" failure mode, so the flag appears verbatim in both output formats.
+
+**Episode mode attribute.** On structured-XML `<episode>` elements, emit `mode="<ingestion_mode>"` when known so readers can see per-episode provenance alongside the facts derived from it.
 
 **Output Formats**
 
@@ -556,12 +635,12 @@ Assembles ranked candidates into structured context packages:
   <project>Sentinel - AI-powered security monitoring</project>
   <knowledge>
     <fact subject="Project Sentinel" predicate="uses" object="Semantic Kernel"
-          evidence="explicit" observed="2025-09-01" source="episode_def456"/>
+          evidence="explicit" observed="2025-09-01" source="episode_def456" sole_source="false"/>
     <fact subject="APIM" predicate="deployed_to" object="Azure Production"
-          evidence="explicit" observed="2025-08-15" source="episode_ghi789"/>
+          evidence="explicit" observed="2025-08-15" source="episode_ghi789" sole_source="true"/>
   </knowledge>
   <episodes>
-    <episode date="2025-01-15" source="claude-code" id="episode_abc123">
+    <episode date="2025-01-15" source="claude-code" id="episode_abc123" mode="live_mcp_capture">
       Discussed APIM authentication flow changes...
     </episode>
   </episodes>

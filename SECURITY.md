@@ -1,33 +1,39 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Context before reporting
 
-If you discover a security vulnerability in Project Loom, please report it responsibly.
+Loom is personal infrastructure, MIT-licensed, unmaintained for anyone other than the author. See [PROJECT-STANCE.md](PROJECT-STANCE.md). Security reports receive best-effort attention — **no SLA, no response guarantee, no formal disclosure process**. If you need a commercially-supported memory system, Loom is not it.
+
+This document exists so that honest reports have somewhere to go and so that the threat model is on the record for anyone evaluating a fork.
+
+## Reporting a vulnerability
+
+If you discover a security vulnerability, please report it responsibly.
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@technicalanxiety.dev** (or use GitHub's private
-vulnerability reporting if available on this repository).
+Use GitHub's private vulnerability reporting if available on the repository, or email the author via the contact on [technicalanxiety.com](https://www.technicalanxiety.com). Include:
 
-Include:
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
 - Suggested fix (if you have one)
 
-We will acknowledge receipt within 48 hours and provide a timeline for a fix.
+I'll look at it when I can. If the vulnerability affects my own deployment, it gets fixed promptly. If it only affects fork-specific configurations I don't run, I may acknowledge it and flag it in docs rather than patch upstream.
 
 ## Security Model
 
 ### Threat Model
 
-Project Loom is designed as a **local-first tool** running on a developer's machine or
-within a trusted network. The primary threat model assumes:
+Project Loom is designed as a **local-first, single-tenant tool** running on the author's (or your fork's) machine or within a trusted network. Multi-tenancy, SaaS hosting, and enterprise SSO are explicitly out of scope. The primary threat model assumes:
 
 - **Trusted operator**: The person running Loom controls the machine and network.
-- **Untrusted input**: Episode content ingested from external sources (chat exports, etc.)
-  may contain malicious content.
-- **Local LLM**: Inference runs locally via Ollama. No data leaves the machine for LLM calls.
+- **Untrusted input**: Episode content ingested from external sources (chat exports, webhooks, vendor imports) may contain malicious content.
+- **Local LLM**: Inference runs locally via Ollama. No data leaves the machine for LLM calls by default. If you configure Azure OpenAI as a fallback, that changes; your fork's threat model is your call.
+
+### Content-authority threat
+
+Loom's authority hierarchy — Episodes > Facts > Procedures — assumes episode `content` is verbatim. The most dangerous non-cryptographic attack surface is **LLM-reconstructed content entering as a live-capture episode** (see [ADR-005](docs/adr/005-verbatim-content-invariant.md)). Loom cannot detect this at runtime; it is prevented by shipped templates, MCP hardcoding of `ingestion_mode = live_mcp_capture`, and user discipline. If your fork changes any of those three layers, audit your authority model carefully.
 
 ### Authentication
 

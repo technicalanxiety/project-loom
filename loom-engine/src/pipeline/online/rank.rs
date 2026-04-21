@@ -194,10 +194,36 @@ pub fn score_stability(candidate: &RetrievalCandidate) -> f64 {
 
 /// Score the **provenance** dimension for a candidate.
 ///
-/// Considers:
-/// - Source episode count: more sources = stronger provenance
-/// - Evidence status authority: user_asserted > observed > extracted > inferred
+/// Combines two inputs:
+///
+/// 1. A base score from the candidate's intrinsic evidence (source episode
+///    count for facts, confidence/observation count for procedures, etc.).
+/// 2. An ingestion-mode coefficient per ADR 004:
+///    - `live_mcp_capture`: 1.0 (ground truth)
+///    - `user_authored_seed`: 0.8
+///    - `vendor_import`: 0.6 (acknowledged as potentially incomplete)
+///
+/// When the candidate has no `provenance_mode` (test fixtures, synthetic
+/// candidates), the coefficient defaults to 1.0 so the intrinsic score is
+/// returned unchanged. Real-data candidates populated by the retrieval
+/// stage always carry a mode.
+///
+/// The coefficient multiplies the base score so an otherwise-equal fact
+/// supported only by seed content ranks below one supported by live capture.
 pub fn score_provenance(candidate: &RetrievalCandidate) -> f64 {
+    let base = score_provenance_base(candidate);
+    let coefficient = candidate
+        .provenance_mode
+        .map(|m| m.provenance_coefficient())
+        .unwrap_or(1.0);
+    (base * coefficient).clamp(0.0, 1.0)
+}
+
+/// Intrinsic provenance score before the ingestion-mode coefficient.
+///
+/// Kept separate so tests and audit tooling can inspect the base score in
+/// isolation from the mode multiplier.
+fn score_provenance_base(candidate: &RetrievalCandidate) -> f64 {
     match &candidate.payload {
         CandidatePayload::Fact(f) => {
             // Source episode count: normalize to [0, 1] (cap at 5 episodes).
@@ -380,6 +406,7 @@ mod tests {
                     .collect(),
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         WeightedCandidate {
             candidate,
@@ -404,6 +431,7 @@ mod tests {
                 occurred_at,
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         WeightedCandidate {
             candidate,
@@ -429,6 +457,7 @@ mod tests {
                 observation_count,
                 namespace: "default".to_string(),
             }),
+            provenance_mode: None,
         };
         WeightedCandidate {
             candidate,

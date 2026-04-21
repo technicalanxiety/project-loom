@@ -215,6 +215,7 @@ mod tests {
             source_profile: profile,
             memory_type,
             payload,
+            provenance_mode: None,
         }
     }
 

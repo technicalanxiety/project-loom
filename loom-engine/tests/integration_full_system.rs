@@ -301,6 +301,7 @@ fn build_fact_candidate(score: f64, namespace: &str) -> RetrievalCandidate {
             source_episodes: vec![Uuid::new_v4()],
             namespace: namespace.to_string(),
         }),
+        provenance_mode: None,
     }
 }
 
@@ -316,6 +317,7 @@ fn build_episode_candidate(score: f64, namespace: &str) -> RetrievalCandidate {
             occurred_at: Utc::now(),
             namespace: namespace.to_string(),
         }),
+        provenance_mode: None,
     }
 }
 
@@ -331,6 +333,7 @@ fn build_procedure_candidate(score: f64, namespace: &str) -> RetrievalCandidate 
             observation_count: 5,
             namespace: namespace.to_string(),
         }),
+        provenance_mode: None,
     }
 }
 
@@ -1141,6 +1144,9 @@ mod namespace_isolation {
             metadata: None,
             participants: None,
             source_event_id: None,
+            ingestion_mode: None,
+            parser_version: None,
+            parser_source_schema: None,
         };
         assert!(learn.namespace.trim().is_empty());
 

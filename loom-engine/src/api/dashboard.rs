@@ -2067,6 +2067,147 @@ pub async fn handle_run_benchmark(
 }
 
 // ---------------------------------------------------------------------------
+// GET /dashboard/api/metrics/parser-health
+// ---------------------------------------------------------------------------
+
+/// Per-parser row in the parser-health view.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ParserHealthRow {
+    /// Parser semantic version (e.g. "claude_ai_parser@0.3.1").
+    pub parser_version: String,
+    /// Vendor export schema version asserted against (e.g. "claude_ai_export_v2").
+    pub parser_source_schema: String,
+    /// Number of episodes ingested by this parser+schema combination.
+    pub episode_count: i64,
+    /// Timestamp of the most recent episode ingested by this parser.
+    pub last_ingested_at: Option<DateTime<Utc>>,
+}
+
+/// Response payload for `GET /dashboard/api/metrics/parser-health`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParserHealthMetrics {
+    /// One row per distinct (parser_version, parser_source_schema) pair.
+    pub parsers: Vec<ParserHealthRow>,
+}
+
+/// Parser-health summary: episode counts and last-run timestamps per
+/// (parser_version, parser_source_schema) pair across all `vendor_import`
+/// episodes. Fulfills the amendment requirement for a dashboard view that
+/// lets the user see which bootstrap parsers have run recently and how
+/// much data they have produced.
+///
+/// Schema-assertion failures do not appear in this view — parsers fail
+/// loud at the CLI boundary and never write episodes on failure, so the
+/// only evidence of a failed run is the absence of a recent
+/// `last_ingested_at`. That is intentional per the degraded-mode contract
+/// in `bootstrap/README.md`.
+pub async fn handle_metrics_parser_health(
+    State(state): State<AppState>,
+) -> Result<Json<ParserHealthMetrics>, DashboardError> {
+    let pool = &state.pools.online;
+    let rows: Vec<ParserHealthRow> = sqlx::query_as(
+        r#"
+        SELECT parser_version,
+               parser_source_schema,
+               COUNT(*) AS episode_count,
+               MAX(ingested_at) AS last_ingested_at
+        FROM loom_episodes
+        WHERE ingestion_mode = 'vendor_import'
+          AND deleted_at IS NULL
+          AND parser_version IS NOT NULL
+          AND parser_source_schema IS NOT NULL
+        GROUP BY parser_version, parser_source_schema
+        ORDER BY last_ingested_at DESC NULLS LAST
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DashboardError::Database(e.to_string()))?;
+    Ok(Json(ParserHealthMetrics { parsers: rows }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /dashboard/api/metrics/ingestion-distribution
+// ---------------------------------------------------------------------------
+
+/// One cell in the ingestion-mode-by-namespace grid.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct IngestionDistributionRow {
+    /// Namespace.
+    pub namespace: String,
+    /// Ingestion mode: `user_authored_seed` | `vendor_import` | `live_mcp_capture`.
+    pub ingestion_mode: String,
+    /// Episode count for this (namespace, ingestion_mode) pair.
+    pub episode_count: i64,
+}
+
+/// A namespace that has no live_mcp_capture or vendor_import evidence —
+/// every fact derived from its episodes will be sole-source flagged in
+/// compiled output.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SeedOnlyNamespace {
+    /// Namespace identifier.
+    pub namespace: String,
+    /// Count of user_authored_seed episodes. Always > 0 by construction.
+    pub seed_episode_count: i64,
+}
+
+/// Response payload for `GET /dashboard/api/metrics/ingestion-distribution`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngestionDistributionMetrics {
+    /// Long-form counts, one row per (namespace, ingestion_mode).
+    pub rows: Vec<IngestionDistributionRow>,
+    /// Namespaces that are seed-only — surfaced as a warning so the user
+    /// can see at a glance which namespaces will rank low and flag as
+    /// sole-source in every compilation.
+    pub seed_only_namespaces: Vec<SeedOnlyNamespace>,
+}
+
+/// Ingestion-mode distribution per namespace, plus the seed-only warning
+/// list. Surfaces the Mode 1 / Mode 2 / Mode 3 breakdown from ADR 004 so
+/// the user can see which namespaces have live corroboration versus which
+/// are still running on seed content only.
+pub async fn handle_metrics_ingestion_distribution(
+    State(state): State<AppState>,
+) -> Result<Json<IngestionDistributionMetrics>, DashboardError> {
+    let pool = &state.pools.online;
+
+    let rows: Vec<IngestionDistributionRow> = sqlx::query_as(
+        r#"
+        SELECT namespace, ingestion_mode, COUNT(*) AS episode_count
+        FROM loom_episodes
+        WHERE deleted_at IS NULL
+        GROUP BY namespace, ingestion_mode
+        ORDER BY namespace, ingestion_mode
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DashboardError::Database(e.to_string()))?;
+
+    // Namespaces whose episodes are 100% user_authored_seed. These are the
+    // ones the sole-source flag will trigger for.
+    let seed_only: Vec<SeedOnlyNamespace> = sqlx::query_as(
+        r#"
+        SELECT namespace, COUNT(*) AS seed_episode_count
+        FROM loom_episodes
+        WHERE deleted_at IS NULL
+        GROUP BY namespace
+        HAVING bool_and(ingestion_mode = 'user_authored_seed')
+        ORDER BY namespace
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DashboardError::Database(e.to_string()))?;
+
+    Ok(Json(IngestionDistributionMetrics {
+        rows,
+        seed_only_namespaces: seed_only,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

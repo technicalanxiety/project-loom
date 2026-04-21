@@ -1,0 +1,14 @@
+{
+  "_comment": "Reference MCP registration for Claude Desktop. Copy into ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%\\Claude\\claude_desktop_config.json (Windows), then replace LOOM_TOKEN and the URL placeholder. The Loom server hardcodes ingestion_mode=live_mcp_capture on every loom_learn call from this transport.",
+  "mcpServers": {
+    "loom": {
+      "transport": {
+        "type": "http",
+        "url": "https://loom.yourdomain.com/mcp",
+        "headers": {
+          "Authorization": "Bearer ${LOOM_TOKEN}"
+        }
+      }
+    }
+  }
+}

@@ -48,6 +48,15 @@ pub struct NewEpisode {
     pub metadata: Option<serde_json::Value>,
     /// People involved in the interaction.
     pub participants: Option<Vec<String>>,
+    /// Provenance class — one of `user_authored_seed`, `vendor_import`,
+    /// `live_mcp_capture`. Enforced by CHECK constraint in migration 015.
+    pub ingestion_mode: String,
+    /// Parser semantic version. Required when `ingestion_mode = 'vendor_import'`,
+    /// must be `None` otherwise (enforced by `chk_parser_fields_vendor_import`).
+    pub parser_version: Option<String>,
+    /// Vendor export schema version asserted against. Required when
+    /// `ingestion_mode = 'vendor_import'`, must be `None` otherwise.
+    pub parser_source_schema: Option<String>,
 }
 
 /// Insert a new episode with idempotency check.
@@ -77,9 +86,10 @@ pub async fn insert_episode(
         r#"
         INSERT INTO loom_episodes (
             source, source_id, source_event_id, content, content_hash,
-            occurred_at, namespace, metadata, participants
+            occurred_at, namespace, metadata, participants,
+            ingestion_mode, parser_version, parser_source_schema
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
         "#,
     )
@@ -92,6 +102,9 @@ pub async fn insert_episode(
     .bind(&ep.namespace)
     .bind(&ep.metadata)
     .bind(&ep.participants)
+    .bind(&ep.ingestion_mode)
+    .bind(&ep.parser_version)
+    .bind(&ep.parser_source_schema)
     .fetch_one(pool)
     .await?;
 

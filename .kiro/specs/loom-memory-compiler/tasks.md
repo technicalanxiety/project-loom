@@ -1127,6 +1127,102 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Review documentation completeness
     - Ensure all tests pass, ask the user if questions arise
 
+## Ingestion Model Amendment (Requirements 53-59)
+
+These tasks retrofit the three-mode ingestion taxonomy, provenance
+coefficient, sole-source flag, bootstrap infrastructure, CLI seed tool,
+and dashboard views onto the completed system. Ordering mirrors amendment
+§12 and was applied retrospectively — at amendment time no data existed,
+so migration 015 declared `ingestion_mode NOT NULL` without a transitional
+DEFAULT (no migration 016 needed).
+
+- [x] 26. Schema: ingestion_mode, parser_version, parser_source_schema
+  - Migration `015_ingestion_mode.sql` adds three columns to `loom_episodes`
+  - CHECK constraint pins `ingestion_mode` to exactly `user_authored_seed`,
+    `vendor_import`, `live_mcp_capture`
+  - `chk_parser_fields_vendor_import` enforces parser-metadata coupling
+  - Indexes on `ingestion_mode` and `(parser_version, ingested_at DESC)`
+  - _Requirements: 53_
+
+- [x] 27. Types: `IngestionMode` enum and shared validators
+  - `src/types/ingestion.rs` with serde snake_case enum,
+    `provenance_coefficient` method, parse/display, shared
+    `validate_parser_fields` helper reused by REST and offline ingest
+  - _Requirements: 53, 54_
+
+- [x] 28. MCP handler hardcodes `live_mcp_capture`
+  - `src/api/mcp.rs::handle_loom_learn` overwrites client-supplied mode and
+    strips parser metadata before insert
+  - _Requirements: 53_
+
+- [x] 29. REST /api/learn validation
+  - `src/api/rest.rs::handle_api_learn` requires `ingestion_mode` (400 on
+    missing), validates parser-metadata coupling, removes the old
+    `source = "manual"` override so callers tag their own source
+  - GitHub webhook handler sets `ingestion_mode = live_mcp_capture`
+    (verbatim real-time capture of external events)
+  - _Requirements: 53_
+
+- [x] 30. Retrieval carries effective provenance mode
+  - `RetrievalCandidate.provenance_mode` field
+  - Fact-lookup query picks MAX ingestion_mode across `source_episodes`
+    (authority order: live > seed > vendor)
+  - Episode-recall query selects `ingestion_mode` directly
+  - _Requirements: 54_
+
+- [x] 31. Stage 5 provenance coefficient
+  - `rank.rs::score_provenance` splits into intrinsic base × coefficient
+  - `None` defaults to neutral 1.0 for synthetic / hot-tier candidates
+  - _Requirements: 54_
+
+- [x] 32. Stage 6 sole_source flag + episode mode attribute
+  - `compile.rs::compute_sole_source`, new fields on `SelectedItem`
+  - XML: `sole_source="…"` on `<fact>`, `mode="…"` on `<episode>`
+  - JSON compact: `sole_source` on fact objects, `mode` on episode objects
+  - _Requirements: 55_
+
+- [x] 33. Bootstrap scaffolding
+  - `bootstrap/README.md` with degraded-mode contract
+  - `bootstrap/schema_assertions.py` shared helper (fail-loud)
+  - `bootstrap/claude_code_parser.py` reference parser for
+    `claude_code_jsonl_v1`
+  - _Requirements: 56_
+
+- [x] 34. CLI seed tool
+  - `cli/loom-seed.py` — walks `*.md`, POSTs as `user_authored_seed`
+  - _Requirements: 57_
+
+- [x] 35. Client templates
+  - `templates/CLAUDE.md` (project-level discipline block)
+  - `templates/claude_desktop_projects_instructions.md` (Desktop Projects
+    instructions)
+  - `templates/claude_desktop_config.example.json` (MCP registration)
+  - `templates/loom-capture.sh` (Claude Code PostSession hook, verbatim
+    transcript POST)
+  - `templates/README.md` explaining the verbatim-content invariant
+  - _Requirements: 59_
+
+- [x] 36. Dashboard endpoints + pages
+  - `GET /dashboard/api/metrics/parser-health` — per-parser rows
+  - `GET /dashboard/api/metrics/ingestion-distribution` — per-namespace
+    breakdown + seed-only warning list
+  - `loom-dashboard/src/pages/ParserHealthPage.tsx`
+  - `loom-dashboard/src/pages/IngestionDistributionPage.tsx`
+  - Navigation entries under a new "Ingestion" section
+  - _Requirements: 58_
+
+- [ ] 37. Codex CLI file watcher (deferred to weeks 9-10)
+  - Same pattern as `loom-capture.sh` but reads `~/.codex/sessions/`
+    rollout files
+  - _Requirements: 59 (secondary surface)_
+
+- [ ] 38. Remaining vendor parsers
+  - `bootstrap/claude_ai_parser.py` — `claude_ai_export_v2` schema
+  - `bootstrap/chatgpt_parser.py` — `chatgpt_export_v1` schema
+  - `bootstrap/codex_cli_parser.py` — `codex_cli_rollout_v1` schema
+  - Each with its own pinned schema and fail-loud assertions
+  - _Requirements: 56_
+
 ## Notes
 
 - All testing tasks are required and must not be skipped
@@ -1140,4 +1236,6 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
 - Docker deployment includes 5 containers: loom-engine, loom-dashboard, postgres, ollama, caddy
 - Embeddings are 768 dimensions via nomic-embed-text (not 1536)
 - Ranking weights: relevance 0.40, recency 0.25, stability 0.20, provenance 0.15
+- Provenance coefficient lookup (per ADR 004): live_mcp_capture=1.0, user_authored_seed=0.8, vendor_import=0.6
 - Primary LLM inference via Ollama (Gemma 4 models), Azure OpenAI as fallback only
+- Episode `content` is always verbatim — transcript excerpt, vendor export excerpt, or user-authored prose. Never LLM summarization. The `llm_reconstruction` ingestion mode does not exist and will not be added (see ADR 005).

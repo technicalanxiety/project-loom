@@ -4,7 +4,19 @@
 
 *"Weaving threads of knowledge into fabric."*
 
-Project Loom is an evidence-grounded memory system for AI workflows. It ingests interaction records (episodes) from multiple sources, extracts structured knowledge as entities and facts, and compiles relevant context packages for AI queries. The system emphasizes strict namespace isolation, temporal fact tracking with provenance, and inspectable retrieval decisions.
+Project Loom is personal memory infrastructure. I am building it for my own use and publishing it under MIT in case the architecture is useful to someone else as a starting point. **It is not a product and is not maintained as one** — no PRs reviewed, no issues answered, no support offered. Read [PROJECT-STANCE.md](PROJECT-STANCE.md) before using it. If what you want is a maintained product, this is not it.
+
+Loom is an evidence-grounded memory system for AI workflows. It ingests interaction records (episodes) from multiple sources, extracts structured knowledge as entities and facts, and compiles relevant context packages for AI queries. The system emphasizes strict namespace isolation, temporal fact tracking with provenance, inspectable retrieval decisions, and — critically — a three-mode ingestion taxonomy that keeps LLM-generated content out of the authority hierarchy (see [ADR-004](docs/adr/004-ingestion-modes.md) and [ADR-005](docs/adr/005-verbatim-content-invariant.md)).
+
+### The three ingestion modes at a glance
+
+| Mode | How it enters | Ranking coefficient |
+|------|----------------|---------------------|
+| `user_authored_seed` (Mode 1) | `cli/loom-seed.py` posts markdown you wrote | 0.8 |
+| `vendor_import` (Mode 2) | `bootstrap/*.py` parsers POST vendor export excerpts | 0.6 |
+| `live_mcp_capture` (Mode 3) | MCP `loom_learn` or `templates/loom-capture.sh` PostSession hook | 1.0 |
+
+The `llm_reconstruction` mode does not exist. LLM summaries of past conversations are not a valid ingestion path — passing one through `loom_learn` is a user-discipline violation that Loom cannot detect at runtime but actively discourages via the shipped templates and documentation.
 
 ---
 
@@ -215,15 +227,36 @@ Expected response:
 
 ### 5. Ingest your first episode
 
+The MCP endpoint hardcodes `ingestion_mode=live_mcp_capture` regardless of what the client sends. The REST endpoint requires it explicitly.
+
 ```bash
+# Via MCP (client does not set ingestion_mode; server hardcodes live_mcp_capture)
 curl -s -X POST https://localhost/mcp/loom_learn \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LOOM_BEARER_TOKEN" \
   -d '{
     "content": "Discussed migrating the auth service from JWT to OAuth2. Team decided to use Azure AD B2C for identity management. Timeline is Q2 2025.",
-    "source": "manual",
+    "source": "claude-code",
     "namespace": "my-project"
   }' | jq
+
+# Or via REST — any of the three modes, explicit
+curl -s -X POST https://localhost/api/learn \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $LOOM_BEARER_TOKEN" \
+  -d '{
+    "content": "(verbatim meeting note, not an LLM summary)",
+    "source": "manual",
+    "namespace": "my-project",
+    "ingestion_mode": "user_authored_seed"
+  }' | jq
+```
+
+For Mode 1 seed documents in bulk, use the CLI tool:
+
+```bash
+LOOM_URL=https://localhost LOOM_TOKEN="$LOOM_BEARER_TOKEN" \
+  python3 cli/loom-seed.py --namespace my-project path/to/seeds/
 ```
 
 Expected response:
@@ -448,9 +481,9 @@ Bypasses classification and retrieval profiles. Returns raw facts for named enti
 
 ## REST API
 
-### POST /api/learn — Manual Episode Ingestion
+### POST /api/learn — Direct Episode Ingestion
 
-Same as `loom_learn` but forces `source = "manual"`. Requires bearer token.
+General-purpose ingestion endpoint. Bootstrap scripts, the CLI seed tool, and the Claude Code PostSession hook all POST here. The caller specifies `ingestion_mode`; the server validates the enum and the parser-metadata coupling.
 
 ```bash
 curl -X POST https://localhost/api/learn \
@@ -458,10 +491,20 @@ curl -X POST https://localhost/api/learn \
   -H "Authorization: Bearer $LOOM_BEARER_TOKEN" \
   -d '{
     "content": "Architecture review notes...",
-    "source": "ignored",
-    "namespace": "my-project"
+    "source": "manual",
+    "namespace": "my-project",
+    "ingestion_mode": "user_authored_seed"
   }'
 ```
+
+**Validation rules:**
+
+| Condition | Response |
+|-----------|----------|
+| `ingestion_mode` missing | HTTP 400 |
+| `ingestion_mode` not one of the three valid values | HTTP 400 |
+| `ingestion_mode = vendor_import` without `parser_version` + `parser_source_schema` | HTTP 400 |
+| `ingestion_mode` is `user_authored_seed` or `live_mcp_capture` but parser fields present | HTTP 400 |
 
 ### POST /api/webhooks/github — GitHub Webhook Ingestion
 
@@ -504,6 +547,8 @@ The operational dashboard is a React SPA at `https://localhost`. It requires bea
 | **Retrieval Quality Metrics** | Precision over time, latency percentiles (p50/p95/p99), classification confidence |
 | **Extraction Quality** | Model comparison, resolution method distribution, custom predicate growth |
 | **Hot-Tier Utilization** | Per-namespace hot tier entity/fact counts and budget utilization |
+| **Parser Health** | Per-bootstrap-parser episode counts, parser versions, last-ingested timestamps |
+| **Ingestion Mode Distribution** | Per-namespace Mode 1/2/3 breakdown with a seed-only warning list |
 
 ### Dashboard API Endpoints
 
@@ -528,6 +573,8 @@ All dashboard endpoints are under `/dashboard/api/` and require bearer token aut
 | GET | `/dashboard/api/metrics/extraction` | Extraction pipeline metrics |
 | GET | `/dashboard/api/metrics/classification` | Classification confidence distribution |
 | GET | `/dashboard/api/metrics/hot-tier` | Hot-tier utilization per namespace |
+| GET | `/dashboard/api/metrics/parser-health` | Per-bootstrap-parser rows: version, schema, episode count, last ingested |
+| GET | `/dashboard/api/metrics/ingestion-distribution` | Per-namespace Mode 1/2/3 counts + seed-only warning list |
 | POST | `/dashboard/api/conflicts/:id/resolve` | Resolve entity conflict |
 | POST | `/dashboard/api/predicates/candidates/:id/resolve` | Resolve predicate candidate |
 
@@ -736,10 +783,10 @@ project-loom/
     └── specs/                          # Spec-driven development
 ```
 
-## Contributing
+## Forking
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, code conventions, and testing requirements.
+Loom is personal infrastructure — PRs are not reviewed and issues are not answered. See [PROJECT-STANCE.md](PROJECT-STANCE.md) for the full rationale. If you are forking, [CONTRIBUTING.md](CONTRIBUTING.md) documents the conventions I follow internally so your fork can stay consistent if that helps you.
 
 ## License
 
-Apache 2.0 — See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE). The license is MIT specifically so forks can evolve in whatever direction their maintainers need without negotiating with me.

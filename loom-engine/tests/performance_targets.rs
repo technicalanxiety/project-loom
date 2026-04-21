@@ -57,6 +57,7 @@ fn mock_candidates(count: usize) -> Vec<RetrievalCandidate> {
                         source_episodes: vec![Uuid::new_v4()],
                         namespace: "test".to_string(),
                     }),
+                    provenance_mode: None,
                 }
             } else {
                 RetrievalCandidate {
@@ -70,6 +71,7 @@ fn mock_candidates(count: usize) -> Vec<RetrievalCandidate> {
                         occurred_at: Utc::now(),
                         namespace: "test".to_string(),
                     }),
+                    provenance_mode: None,
                 }
             }
         })

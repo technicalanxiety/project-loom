@@ -28,6 +28,11 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 - **Caddy_Proxy**: Reverse proxy providing TLS termination, static file serving for the dashboard, and routing to the loom-engine
 - **Ollama_Service**: Local LLM inference server running Gemma 4 26B MoE (extraction), Gemma 4 E4B (classification), and nomic-embed-text (embeddings)
 - **Extraction_Metrics**: A structured record of per-episode extraction statistics stored as JSONB on the episode record
+- **Ingestion_Mode**: The provenance class of an episode — one of `user_authored_seed` (Mode 1), `vendor_import` (Mode 2), or `live_mcp_capture` (Mode 3). Stored on every episode row and enforced by CHECK constraint.
+- **Sole_Source_Flag**: A per-item boolean on compiled output indicating that the item's only provenance is a `user_authored_seed` episode — no live or vendor corroboration exists.
+- **Parser_Version**: Semantic version identifier of a bootstrap parser (e.g. `claude_ai_parser@0.3.1`) populated on every `vendor_import` episode.
+- **Parser_Source_Schema**: Vendor export schema version a bootstrap parser asserts against (e.g. `claude_ai_export_v2`) populated on every `vendor_import` episode.
+- **LLM_Reconstruction_Trap**: The architectural pattern in which LLM summaries or paraphrases enter the authority hierarchy as first-class evidence, poisoning the provenance chain. Rejected by design — no ingestion mode accepts it, the `content` verbatim invariant forbids it, shipped client templates prevent it.
 
 
 ## Requirements
@@ -38,12 +43,13 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 
 #### Acceptance Criteria
 
-1. WHEN an episode is submitted via loom_learn, THE Loom_Engine SHALL store the episode with source, content, occurred_at timestamp, and namespace
+1. WHEN an episode is submitted via loom_learn, THE Loom_Engine SHALL store the episode with source, content, occurred_at timestamp, namespace, and ingestion_mode
 2. WHEN an episode with an existing source and source_event_id combination is submitted, THE Loom_Engine SHALL skip ingestion and return a duplicate indicator
 3. THE Loom_Engine SHALL compute a SHA-256 content hash for each episode using the sha2 crate
 4. THE Loom_Engine SHALL record ingestion timestamp and source metadata for each episode
 5. WHERE an episode includes participant information, THE Loom_Engine SHALL store the participant list
 6. THE Loom_Engine SHALL support manual, claude-code, and github source types
+7. THE Loom_Engine SHALL enforce that episode `content` is verbatim — a transcript excerpt, a vendor export excerpt, or user-authored prose — and never LLM summarization output; enforcement lives in the MCP tool contract, shipped client templates, and user discipline, not at runtime
 
 ### Requirement 2: Entity Extraction with Type Constraints
 
@@ -766,6 +772,98 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 4. THE Loom_Engine SHALL use nomic-embed-text for generating 768-dimension embeddings
 5. THE Loom_Engine SHALL support Azure OpenAI as a fallback inference provider when Ollama is unavailable or when quality thresholds are not met with local models
 6. THE Loom_Engine SHALL configure model endpoints via environment variables
+
+### Requirement 53: Three-Mode Ingestion Taxonomy
+
+**User Story:** As the primary user of Loom, I want every episode tagged with its provenance class at ingestion time, so that ranking and compilation can distinguish seed content from live capture from vendor imports without inference.
+
+#### Acceptance Criteria
+
+1. THE Loom_Engine SHALL enforce that every episode carries exactly one of three `ingestion_mode` values: `user_authored_seed`, `vendor_import`, or `live_mcp_capture`
+2. THE Loom_Engine SHALL enforce the CHECK constraint on `ingestion_mode` at the database layer so invalid values cannot be inserted
+3. THE Loom_Engine SHALL NOT accept any `llm_reconstruction` value or equivalent mode representing LLM-generated content; that mode is rejected architecturally
+4. WHEN a request arrives via MCP, THE Loom_Engine SHALL hardcode `ingestion_mode = live_mcp_capture` regardless of what the client sent, preventing client-side forgery of the mode
+5. WHEN a request arrives via REST `/api/learn`, THE Loom_Engine SHALL require `ingestion_mode` in the request body and return HTTP 400 when absent or invalid
+6. WHEN `ingestion_mode = vendor_import`, THE Loom_Engine SHALL require non-empty `parser_version` and `parser_source_schema` fields; otherwise THE Loom_Engine SHALL reject both fields
+7. THE Loom_Engine SHALL expose the three-mode taxonomy via a shared Rust enum so every module that reads or writes mode values uses identical names
+
+### Requirement 54: Provenance Coefficient in Stage 5 Ranking
+
+**User Story:** As the primary user of Loom, I want live-captured evidence to outrank seed content, and seed to outrank vendor imports, so that compiled context reflects the authority hierarchy.
+
+#### Acceptance Criteria
+
+1. THE Loom_Engine SHALL apply a provenance coefficient of 1.0 to candidates whose effective ingestion mode is `live_mcp_capture`
+2. THE Loom_Engine SHALL apply a provenance coefficient of 0.8 to candidates whose effective ingestion mode is `user_authored_seed`
+3. THE Loom_Engine SHALL apply a provenance coefficient of 0.6 to candidates whose effective ingestion mode is `vendor_import`
+4. WHEN a candidate is a fact supported by multiple source episodes, THE Loom_Engine SHALL use the MAX provenance coefficient across all source episodes
+5. THE Loom_Engine SHALL multiply the provenance dimension score by the coefficient before combining it with relevance, recency, and stability in the composite score
+6. WHERE a candidate lacks mode metadata (synthetic or hot-tier items), THE Loom_Engine SHALL use a neutral coefficient of 1.0 so the intrinsic provenance score is returned unchanged
+
+### Requirement 55: Sole-Source Flag in Stage 6 Compilation
+
+**User Story:** As the primary user of Loom, I want compiled output to mark facts whose only provenance is seed content, so that I can decide whether to trust them or verify against source.
+
+#### Acceptance Criteria
+
+1. THE Loom_Engine SHALL emit a `sole_source` boolean on every compiled fact whose effective ingestion mode is known
+2. THE Loom_Engine SHALL set `sole_source = true` when the effective ingestion mode is `user_authored_seed` (no live or vendor corroboration exists)
+3. THE Loom_Engine SHALL set `sole_source = false` when the effective ingestion mode is `live_mcp_capture` or `vendor_import`
+4. WHERE a fact lacks mode metadata (hot-tier items), THE Loom_Engine SHALL omit the `sole_source` attribute rather than defaulting to either boolean
+5. THE Loom_Engine SHALL render `sole_source` as an XML attribute on `<fact>` elements in structured output
+6. THE Loom_Engine SHALL render `sole_source` as a JSON field on fact objects in compact output
+7. THE Loom_Engine SHALL render `mode="<ingestion_mode>"` as an XML attribute on `<episode>` elements in structured output when mode is known
+
+### Requirement 56: Bootstrap Parser Schema Assertions and Degraded-Mode Contract
+
+**User Story:** As the primary user of Loom, I want vendor-export parsers to fail loud on schema drift rather than silently ingest partial data, so that my authority model is not polluted by parsers pretending everything is fine.
+
+#### Acceptance Criteria
+
+1. WHEN a bootstrap parser processes a vendor export, THE parser SHALL assert a pinned schema naming each required field and its expected type
+2. IF a required field is missing or wrongly typed, THE parser SHALL exit non-zero with an error naming the specific failing field and the schema version
+3. THE parser SHALL NOT best-effort parse, silently skip, or otherwise degrade when the asserted schema does not match
+4. THE parser SHALL set `ingestion_mode = vendor_import`, `parser_version = "<name>@<semver>"`, and `parser_source_schema = "<schema_identifier>"` on every episode it posts
+5. WHEN a parser re-runs against an export it has partially ingested before, THE content_hash idempotency layer SHALL deduplicate without manual cleanup
+6. THE parser SHALL NOT transform or summarize the source content; episode `content` SHALL be the verbatim excerpt from the export
+
+### Requirement 57: Mode 1 User-Authored Seed CLI
+
+**User Story:** As the primary user of Loom, I want a CLI tool that ingests markdown documents I have authored as Mode 1 seed episodes, so that I can establish foundational context for a namespace without depending on export quality.
+
+#### Acceptance Criteria
+
+1. THE CLI seed tool SHALL accept one or more file or directory paths and discover `*.md` files recursively
+2. THE CLI seed tool SHALL POST each markdown document as a single episode to `/api/learn` with `ingestion_mode = user_authored_seed`
+3. THE CLI seed tool SHALL NOT populate `parser_version` or `parser_source_schema` (those fields are reserved for Mode 2)
+4. THE CLI seed tool SHALL treat the file content as verbatim and make no transformations to it
+5. THE CLI seed tool SHALL read `LOOM_URL` and `LOOM_TOKEN` from the environment and exit non-zero if either is unset
+6. THE CLI seed tool SHALL generate a stable `source_event_id` per file so re-runs are idempotent at the dedup layer
+
+### Requirement 58: Parser Health and Ingestion Distribution Dashboard Views
+
+**User Story:** As the primary user of Loom, I want the dashboard to surface which bootstrap parsers have run recently and which namespaces are seed-only, so that I can see at a glance where my authority model has gaps.
+
+#### Acceptance Criteria
+
+1. THE Dashboard API SHALL expose `GET /dashboard/api/metrics/parser-health` returning one row per `(parser_version, parser_source_schema)` pair with episode count and last-ingested timestamp
+2. THE Dashboard API SHALL expose `GET /dashboard/api/metrics/ingestion-distribution` returning episode counts per `(namespace, ingestion_mode)` pair
+3. THE ingestion-distribution endpoint SHALL separately return a list of namespaces whose episodes are 100% `user_authored_seed` so the dashboard can surface them as a warning
+4. THE Dashboard SPA SHALL render a Parser Health page showing the per-parser rows and a note that failed parser runs do not appear here (they fail loud at the CLI and never write)
+5. THE Dashboard SPA SHALL render an Ingestion Mode Distribution page showing the per-namespace breakdown and prominently surfacing the seed-only warning list
+
+### Requirement 59: Exhaustive Live Capture via PostSession Hook
+
+**User Story:** As the primary user of Loom, I want Claude Code sessions captured in full, verbatim, without the model making judgment calls about what matters, so that the live-capture layer has no LLM inference at the boundary.
+
+#### Acceptance Criteria
+
+1. THE Loom_Engine SHALL ship a `templates/loom-capture.sh` PostSession hook that reads raw session JSONL from Claude Code
+2. THE hook SHALL POST the full transcript verbatim to `/api/learn` with `ingestion_mode = live_mcp_capture`
+3. THE hook SHALL NOT summarize, filter, or transform the transcript content before posting
+4. THE hook SHALL derive `source_event_id` from the session file path and modification time so re-runs are idempotent
+5. THE Loom_Engine SHALL ship a `templates/CLAUDE.md` template that instructs the model to call `loom_learn` only with verbatim content and to leave exhaustive capture to the hook
+6. THE Loom_Engine SHALL ship a `templates/claude_desktop_projects_instructions.md` template carrying the same verbatim-content discipline for Claude Desktop selective capture
 
 ---
 

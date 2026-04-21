@@ -276,6 +276,44 @@ export interface HotTierMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// Ingestion-mode observability types (ADR 004)
+// ---------------------------------------------------------------------------
+
+/** One row in the parser-health view: how many episodes a given
+ *  (parser_version, parser_source_schema) pair has produced, and when. */
+export interface ParserHealthRow {
+  parser_version: string;
+  parser_source_schema: string;
+  episode_count: number;
+  last_ingested_at: string | null;
+}
+
+/** Parser-health response payload. */
+export interface ParserHealthMetrics {
+  parsers: ParserHealthRow[];
+}
+
+/** One cell of the ingestion-mode distribution grid. */
+export interface IngestionDistributionRow {
+  namespace: string;
+  ingestion_mode: 'user_authored_seed' | 'vendor_import' | 'live_mcp_capture';
+  episode_count: number;
+}
+
+/** A namespace whose episodes are 100% user_authored_seed — every compiled
+ *  fact will carry sole_source=true. */
+export interface SeedOnlyNamespace {
+  namespace: string;
+  seed_episode_count: number;
+}
+
+/** Ingestion-distribution response payload. */
+export interface IngestionDistributionMetrics {
+  rows: IngestionDistributionRow[];
+  seed_only_namespaces: SeedOnlyNamespace[];
+}
+
+// ---------------------------------------------------------------------------
 // Graph types
 // ---------------------------------------------------------------------------
 
