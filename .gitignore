@@ -83,6 +83,7 @@ caddy_config/
 # Proptest
 # =========================
 *.proptest-regressions
+**/proptest-regressions/
 
 # =========================
 # Claude / Kiro worktrees

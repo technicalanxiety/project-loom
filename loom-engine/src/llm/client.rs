@@ -87,6 +87,14 @@ impl LlmClient {
     ///
     /// The underlying reqwest client is configured with a 30-second timeout.
     pub fn new(config: &LlmConfig) -> Result<Self, LlmError> {
+        // Ensure the rustls crypto provider is installed before reqwest
+        // attempts any TLS handshake. reqwest is compiled with
+        // `rustls-no-provider` so that the binary can cross-compile to musl
+        // without aws-lc-sys; callers must install a provider themselves.
+        // Idempotent — safe to call from tests that construct multiple
+        // LlmClients and from main() which also calls it.
+        crate::ensure_crypto_provider();
+
         let http = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .build()?;

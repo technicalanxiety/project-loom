@@ -199,14 +199,27 @@ impl DbPools {
         Ok(())
     }
 
-    /// Verify that pgvector and pgAudit extensions are available.
+    /// Verify that required + optional PostgreSQL extensions are available.
+    ///
+    /// `vector` (pgvector) is required — the similarity-search queries in the
+    /// retrieval pipeline will not function without it, so a missing
+    /// pgvector halts startup with [`PoolError::MissingExtension`].
+    ///
+    /// `pgaudit` is optional. It provides defense-in-depth database-level
+    /// audit logging that complements (but does not replace) the
+    /// application-level audit written to `loom_audit_log` by every
+    /// compilation. When pgaudit is absent — the standard `pgvector/pgvector`
+    /// Docker image does not ship it — the engine logs a warning and
+    /// continues. Install via the `postgresql-<N>-pgaudit` package on
+    /// Debian-derived images if you need it.
     async fn validate_extensions(&self) -> Result<(), PoolError> {
         let extensions: Vec<String> =
             sqlx::query_scalar("SELECT extname::text FROM pg_extension WHERE extname IN ('vector', 'pgaudit')")
                 .fetch_all(&self.online)
                 .await?;
 
-        for required in &["vector", "pgaudit"] {
+        // Required extensions — missing means halt startup.
+        for required in &["vector"] {
             if !extensions.iter().any(|e| e == required) {
                 return Err(PoolError::MissingExtension {
                     extension: (*required).to_string(),
@@ -214,7 +227,19 @@ impl DbPools {
             }
         }
 
-        tracing::info!(?extensions, "required PostgreSQL extensions verified");
+        // Optional extensions — missing means warn and continue.
+        for optional in &["pgaudit"] {
+            if !extensions.iter().any(|e| e == optional) {
+                tracing::warn!(
+                    extension = optional,
+                    "optional PostgreSQL extension not installed; \
+                     database-level audit logging disabled. \
+                     Application-level audit via loom_audit_log is unaffected."
+                );
+            }
+        }
+
+        tracing::info!(?extensions, "PostgreSQL extensions verified");
         Ok(())
     }
 }
