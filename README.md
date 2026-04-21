@@ -250,7 +250,7 @@ docker compose exec ollama ollama pull gemma4:26b
 ### 4. Verify health
 
 ```bash
-curl -s https://localhost/api/health | jq
+curl -s https://localhost/api/health -k | jq
 ```
 
 Expected response:
