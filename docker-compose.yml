@@ -85,6 +85,12 @@ services:
     ports:
       - "443:443"
       - "80:80"
+    environment:
+      # Caddy injects this as `Authorization: Bearer <token>` on
+      # /dashboard/api/* requests so the in-browser SPA doesn't need to
+      # manage a token. External clients calling /mcp/* or /api/* must
+      # still provide their own Authorization header.
+      LOOM_BEARER_TOKEN: "${LOOM_BEARER_TOKEN}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - dashboard_dist:/srv/dashboard:ro

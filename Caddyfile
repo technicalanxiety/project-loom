@@ -15,18 +15,31 @@
 
 localhost {
 	# ── MCP endpoints → loom-engine ──────────────────────────
+	# External clients (Claude Code, Claude Desktop, etc.) must supply
+	# their own `Authorization: Bearer <token>` header. Caddy does not
+	# inject one here.
 	handle /mcp/* {
 		reverse_proxy loom-engine:8080
 	}
 
 	# ── REST API → loom-engine ───────────────────────────────
+	# Same contract as /mcp/*. External clients bring their own token.
 	handle /api/* {
 		reverse_proxy loom-engine:8080
 	}
 
 	# ── Dashboard API → loom-engine ──────────────────────────
+	# The SPA runs in a browser and cannot carry a token of its own.
+	# Caddy injects the shared bearer token on requests originating from
+	# the dashboard SPA so the user does not have to manage a token in
+	# browser storage. This trades CSRF exposure on /dashboard/api/*
+	# endpoints for simplicity — acceptable for personal-infrastructure
+	# deployment where Caddy is bound to localhost or a trusted network.
+	# If you deploy to a hostile network, add a login flow instead.
 	handle /dashboard/api/* {
-		reverse_proxy loom-engine:8080
+		reverse_proxy loom-engine:8080 {
+			header_up Authorization "Bearer {env.LOOM_BEARER_TOKEN}"
+		}
 	}
 
 	# ── Dashboard static files (SPA fallback) ────────────────
