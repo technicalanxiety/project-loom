@@ -811,8 +811,8 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Test namespace listing
     - _Requirements: 37.1, 50.2, 50.3, 50.4, 50.5_
 
-- [ ] 17. Source connectors and namespace isolation
-  - [~] 17.1 Implement GitHub webhook connector
+- [x] 17. Source connectors and namespace isolation
+  - [x] 17.1 Implement GitHub webhook connector
     - In `src/api/rest.rs`, add POST /api/webhooks/github endpoint
     - Support pull request comment events and issue comment events
     - Extract occurred_at from GitHub event timestamps
@@ -822,7 +822,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Process through same extraction pipeline as other sources
     - _Requirements: 38.1, 38.2, 38.3, 38.4, 38.5, 38.6, 38.7_
 
-  - [~] 17.2 Implement Claude Code MCP integration
+  - [x] 17.2 Implement Claude Code MCP integration
     - Register MCP endpoints with Claude Code via HTTP transport
     - Ingest episodes with source='claude-code'
     - Resolve namespace from Claude Code working directory context
@@ -830,7 +830,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Create CLAUDE.md configuration file documenting MCP integration
     - _Requirements: 30.1, 30.2, 30.3, 30.4, 30.5, 30.6_
 
-  - [~] 17.3 Implement namespace isolation enforcement
+  - [x] 17.3 Implement namespace isolation enforcement
     - Add namespace filter to all retrieval queries (episodes, entities, facts, procedures)
     - Prevent cross-namespace entity references in facts (validate subject, object, fact all same namespace)
     - Maintain separate hot tier budgets per namespace
@@ -838,7 +838,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Maintain default namespace for general knowledge
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
 
-  - [~] 17.4 Implement soft deletion with audit trail
+  - [x] 17.4 Implement soft deletion with audit trail
     - Implement soft_delete functions for episodes, entities, facts, procedures
     - Set deleted_at timestamp and optional deletion_reason
     - Exclude soft-deleted records from all retrieval queries (WHERE deleted_at IS NULL)
@@ -846,19 +846,19 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Allow operators to query soft-deleted records for audit purposes
     - _Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 20.5_
 
-  - [~] 17.5 Write property test for namespace isolation
+  - [x] 17.5 Write property test for namespace isolation
     - **Property 14: Namespace Isolation**
     - **Validates: Requirements 7.1, 7.2, 7.4**
     - Test that queries scoped to namespace A never return results from namespace B
     - Test that facts always have subject, object, and fact in same namespace
 
-  - [~] 17.6 Write property test for soft deletion filtering
+  - [x] 17.6 Write property test for soft deletion filtering
     - **Property 27: Soft Deletion Filtering**
     - **Validates: Requirements 27.1, 27.3**
     - Test that soft-deleted items have deleted_at set to non-NULL timestamp
     - Test that all retrieval queries exclude items with deleted_at != NULL
 
-  - [~] 17.7 Write unit tests for connectors and isolation
+  - [x] 17.7 Write unit tests for connectors and isolation
     - Test GitHub webhook parsing and idempotency
     - Test Claude Code namespace resolution
     - Test namespace filter application in all queries
@@ -867,8 +867,8 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - _Requirements: 38.1, 30.1, 7.2, 7.4, 27.1_
 
 
-- [ ] 18. Procedure extraction and retrieval
-  - [~] 18.1 Implement procedure extraction
+- [x] 18. Procedure extraction and retrieval
+  - [x] 18.1 Implement procedure extraction
     - In `src/pipeline/offline/procedures.rs`, add optional procedure flagging to extraction pipeline
     - Store procedures with pattern, category, namespace in loom_procedures
     - Link to source episode identifiers (source_episodes array)
@@ -877,13 +877,13 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Assign 'extracted' evidence_status to new procedures
     - _Requirements: 33.1, 33.2, 33.3, 33.4, 33.5, 33.6, 33.7_
 
-  - [~] 18.2 Implement procedure promotion logic
+  - [x] 18.2 Implement procedure promotion logic
     - Promote to evidence_status='promoted' when confidence >= 0.8 and observation_count >= 3
     - Prevent hot tier until 3+ episodes, 7+ days, confidence >= 0.8
     - Generate 768-dimension embedding for procedure pattern via nomic-embed-text
     - _Requirements: 33.8, 14.9_
 
-  - [~] 18.3 Write unit tests for procedure extraction and retrieval
+  - [x] 18.3 Write unit tests for procedure extraction and retrieval
     - Test procedure flagging and storage
     - Test confidence scoring and promotion
     - Test hot tier prevention criteria
@@ -891,60 +891,60 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - _Requirements: 33.1, 33.6, 33.8, 34.1, 34.7_
 
 
-- [ ] 19. Additional property tests and validation
-  - [~] 19.1 Write property test for entity type constraint
+- [x] 19. Additional property tests and validation
+  - [x] 19.1 Write property test for entity type constraint
     - **Property 4: Entity Type Constraint**
     - **Validates: Requirements 2.2, 2.5, 43.9**
     - Test that all extracted entity types are one of 10 valid types
     - Test that malformed LLM responses with invalid types are rejected by serde
 
-  - [~] 19.2 Write property test for pack-aware predicate promotion
+  - [x] 19.2 Write property test for pack-aware predicate promotion
     - **Property 11: Pack-Aware Predicate Promotion**
     - **Validates: Requirements 5.6, 5.7**
     - Test that promoted custom predicates have promoted_to_pack referencing a valid pack
 
-  - [~] 19.3 Write property test for current fact filtering
+  - [x] 19.3 Write property test for current fact filtering
     - **Property 13: Current Fact Filtering**
     - **Validates: Requirements 6.6, 10.1, 10.3**
     - Test that fact retrieval without historical flag only returns facts with valid_until IS NULL and deleted_at IS NULL
 
-  - [~] 19.4 Write property test for evidence status validity
+  - [x] 19.4 Write property test for evidence status validity
     - **Property 28: Evidence Status Validity**
     - **Validates: Requirements 32.1**
     - Test that all facts have one of 7 valid evidence_status values
 
-  - [~] 19.5 Write property test for fact provenance non-empty
+  - [x] 19.5 Write property test for fact provenance non-empty
     - **Property 29: Fact Provenance Non-Empty**
     - **Validates: Requirements 4.11, 41.1**
     - Test that all facts have non-empty source_episodes array
 
-  - [~] 19.6 Write property test for alias deduplication
+  - [x] 19.6 Write property test for alias deduplication
     - **Property 30: Alias Deduplication**
     - **Validates: Requirements 42.3**
     - Test that entity aliases arrays have no case-insensitive duplicates
 
-- [ ] 20. Error handling and resilience
-  - [~] 20.1 Implement episode ingestion error handling
+- [x] 20. Error handling and resilience
+  - [x] 20.1 Implement episode ingestion error handling
     - Handle duplicate detection (return existing episode_id with status "duplicate")
     - Handle invalid data via serde deserialization (return 400 Bad Request with specific field errors)
     - Handle embedding generation failures (retry 3x with exponential backoff via Ollama)
     - Queue failed episodes for retry (mark processed=false)
     - Log all errors via tracing with span context
 
-  - [~] 20.2 Implement entity resolution error handling
+  - [x] 20.2 Implement entity resolution error handling
     - Handle semantic similarity API failures (fall back to creating new entity — prefer fragmentation)
     - Handle ambiguous resolutions (create new entity, log conflict to loom_resolution_conflicts)
     - Handle entity type constraint violations (serde rejection, skip entity, log error)
     - Mark entities for manual review in dashboard on failures
 
-  - [~] 20.3 Implement fact extraction error handling
+  - [x] 20.3 Implement fact extraction error handling
     - Handle invalid entity references (skip fact, log reference error)
     - Handle predicate validation failures (skip fact, log error)
     - Handle supersession conflicts (use most recent valid_from)
     - Handle pack loading failure (fall back to core pack only, log warning)
     - Continue processing other facts on individual failures
 
-  - [~] 20.4 Implement retrieval and compilation error handling
+  - [x] 20.4 Implement retrieval and compilation error handling
     - Handle namespace not found (fall back to 'default' namespace)
     - Handle profile execution timeouts (cancel via tokio timeout at 5 seconds, continue with other profiles)
     - Handle empty result sets (return empty context package with explanation)
@@ -953,7 +953,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Handle ranking dimension errors (use default score 0.5)
     - Log all errors via tracing
 
-  - [~] 20.5 Implement database and external service error handling
+  - [x] 20.5 Implement database and external service error handling
     - Handle PostgreSQL connection failures (sqlx pool auto-reconnect, retry 3x, return 503)
     - Handle constraint violations (treat as duplicate, return existing record)
     - Handle transaction rollbacks (mark episode unprocessed, retry after 5 min via tokio timer)
@@ -962,15 +962,15 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Handle embedding dimension mismatch (reject, log error, retry with correct model)
     - Log all errors via tracing with span context
 
-  - [~] 20.6 Write unit tests for error handling
+  - [x] 20.6 Write unit tests for error handling
     - Test all error scenarios with mocked failures (reqwest mock for Ollama)
     - Test retry logic and exponential backoff
     - Test fallback behaviors (Ollama → Azure OpenAI, namespace → default)
     - Test error logging completeness
 
 
-- [ ] 21. Dashboard React SPA
-  - [~] 21.1 Initialize loom-dashboard project
+- [x] 21. Dashboard React SPA
+  - [x] 21.1 Initialize loom-dashboard project
     - Create `loom-dashboard/` directory with Vite + React + TypeScript setup
     - Configure package.json with dependencies: react, react-dom, react-router-dom, typescript, vite, tailwindcss (or similar)
     - Create typed API client module communicating with loom-engine `/dashboard/api/*` endpoints
@@ -978,7 +978,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Create Dockerfile for dashboard build (multi-stage: node builder + output copy)
     - _Requirements: 45.8, 49.1_
 
-  - [~] 21.2 Implement pipeline health view
+  - [x] 21.2 Implement pipeline health view
     - Episode counts by source and namespace
     - Entity counts by type
     - Current vs superseded fact counts
@@ -986,43 +986,43 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Model configuration display (Ollama models, fallback status)
     - _Requirements: 49.1_
 
-  - [~] 21.3 Implement compilation trace viewer
+  - [x] 21.3 Implement compilation trace viewer
     - Paginated list of loom_think calls with timestamp, query, namespace, classification, confidence, latency, token count
     - Drill-down showing candidates found/selected/rejected with per-candidate score breakdown across relevance, recency, stability, provenance
     - _Requirements: 49.2, 49.3_
 
-  - [~] 21.4 Implement knowledge graph explorer
+  - [x] 21.4 Implement knowledge graph explorer
     - Entity search with type and namespace filters
     - Entity detail with properties, aliases, source episodes
     - Visual graph rendering of 1-2 hop neighborhoods (using loom_traverse data)
     - Fact detail with temporal range (valid_from/valid_until) and supersession chain
     - _Requirements: 49.4_
 
-  - [~] 21.5 Implement entity conflict review queue
+  - [x] 21.5 Implement entity conflict review queue
     - List unresolved conflicts with candidate matches and similarity scores
     - Actions: merge, keep separate, split
     - POST to /dashboard/api/conflicts/:id/resolve
     - _Requirements: 49.5, 23.4, 23.6_
 
-  - [~] 21.6 Implement predicate management views
+  - [x] 21.6 Implement predicate management views
     - Predicate candidate review: unmapped custom predicates with occurrence counts, example facts; actions to map to existing canonical or promote with target pack selection
     - Predicate pack browser: all packs with predicate counts, drill-down to pack predicates with categories and usage counts, per-namespace active packs, usage heatmap
     - _Requirements: 49.6, 49.7, 5.4, 5.6_
 
-  - [~] 21.7 Implement metrics and quality views
+  - [x] 21.7 Implement metrics and quality views
     - Retrieval quality metrics: precision over time, latency percentiles (p50, p95, p99), classification confidence distribution, hot-tier utilization per namespace
     - Extraction quality view: model comparison (Gemma 4 vs gpt-4.1-mini), entity resolution method distribution, custom predicate growth rate, entity fragmentation detection
     - Benchmark comparison view: side-by-side A/B/C condition results
     - _Requirements: 49.8, 49.9, 49.10, 35.7, 48.8_
 
-  - [~] 21.8 Write unit tests for dashboard components
+  - [x] 21.8 Write unit tests for dashboard components
     - Test typed API client with mocked responses
     - Test view rendering with sample data
     - Test conflict resolution and predicate management actions
     - _Requirements: 49.1, 49.5, 49.6_
 
 
-- [ ] 22. Checkpoint - Full system integration testing
+- [x] 22. Checkpoint - Full system integration testing
   - Run end-to-end integration tests for all workflows
   - Test complete offline pipeline: loom_learn → embedding → extraction → resolution → facts → supersession → metrics
   - Test complete online pipeline: loom_think → classification → retrieval (parallel) → weighting → ranking → compilation → audit
@@ -1038,15 +1038,15 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
   - Ensure all tests pass, ask the user if questions arise
   - _Requirements: 7.2, 14.1, 15.1, 18.1, 44.6, 44.7, 45.1_
 
-- [ ] 23. Performance optimization and monitoring
-  - [~] 23.1 Optimize database queries and connection pools
+- [x] 23. Performance optimization and monitoring
+  - [x] 23.1 Optimize database queries and connection pools
     - Tune IVFFlat index parameters for vector similarity queries
     - Configure online and offline connection pool sizes independently
     - Add query timeout limits
     - Add query result caching for hot tier items
     - _Requirements: 44.7_
 
-  - [~] 23.2 Implement performance monitoring via tracing
+  - [x] 23.2 Implement performance monitoring via tracing
     - Track latency breakdown by stage (classify, retrieve, rank, compile) using tracing spans
     - Track extraction metrics per episode (stored as JSONB)
     - Track resolution method distribution (exact, alias, semantic, new)
@@ -1055,7 +1055,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Surface all metrics in dashboard views
     - _Requirements: 35.1, 35.2, 35.3, 35.4, 35.5, 35.6, 35.7, 36.1, 36.2, 36.3_
 
-  - [~] 23.3 Validate performance targets
+  - [x] 23.3 Validate performance targets
     - Validate loom_think p95 < 500ms, p99 < 1000ms
     - Validate loom_learn < 100ms (async return)
     - Validate episode processing < 3 seconds per episode
@@ -1063,20 +1063,20 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Test 100 episodes per minute ingestion (offline pool)
     - _Requirements: 35.7_
 
-  - [~] 23.4 Write unit tests for performance monitoring
+  - [x] 23.4 Write unit tests for performance monitoring
     - Test latency measurement accuracy via tracing spans
     - Test metrics aggregation
     - Test percentile calculations (p50, p95, p99)
     - _Requirements: 35.1, 35.6, 35.7_
 
 
-- [ ] 24. Documentation and deployment finalization
-  - [~] 24.1 Create project documentation
+- [x] 24. Documentation and deployment finalization
+  - [x] 24.1 Create project documentation
     - README.md: project overview, architecture, prerequisites (Docker, PostgreSQL, Ollama), installation, configuration (.env), quick start, MCP endpoint documentation
     - CLAUDE.md: MCP endpoint registration for Claude Code, namespace resolution, manual override examples, usage examples
     - _Requirements: 30.4_
 
-  - [~] 24.2 Finalize Docker deployment
+  - [x] 24.2 Finalize Docker deployment
     - Test `docker-compose up` with all 5 services (loom-engine, loom-dashboard, postgres, ollama, caddy)
     - Verify PostgreSQL extensions enabled (pgvector, pgAudit)
     - Verify sqlx migrations run on startup
@@ -1088,15 +1088,15 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - _Requirements: 45.1, 45.2, 45.3, 45.4, 45.5, 45.6, 45.7, 45.8, 45.9, 45.10, 45.11, 46.1, 46.2, 46.3, 46.4, 46.5, 51.1, 51.2, 51.3, 51.4, 51.5_
 
 
-- [ ] 25. Final validation and benchmark evaluation
-  - [~] 25.1 Run comprehensive test suite
+- [x] 25. Final validation and benchmark evaluation
+  - [x] 25.1 Run comprehensive test suite
     - Execute all Rust unit tests (target 80% coverage)
     - Execute all property tests (34 correctness properties, 100 iterations each via proptest)
     - Execute all integration tests
     - Execute dashboard component tests
     - Verify all tests pass
 
-  - [~] 25.2 Execute benchmark evaluation protocol
+  - [x] 25.2 Execute benchmark evaluation protocol
     - Prepare 10+ benchmark tasks
     - Run Condition A: No memory (baseline)
     - Run Condition B: Episode-only retrieval
@@ -1105,13 +1105,13 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Display results in dashboard benchmark comparison view
     - _Requirements: 47.1, 47.2, 47.3, 47.4, 47.5, 47.9_
 
-  - [~] 25.3 Validate benchmark success criteria
+  - [x] 25.3 Validate benchmark success criteria
     - Verify Condition C beats Condition B by >= 15% precision
     - Verify Condition C achieves >= 30% token reduction vs Condition B
     - Verify Condition C maintains task success rate (no regression)
     - _Requirements: 47.6, 47.7, 47.8_
 
-  - [~] 25.4 Final system validation
+  - [x] 25.4 Final system validation
     - Verify all 52 requirements are covered by implementation
     - Verify all 34 correctness properties pass
     - Verify extraction quality gate passed (50 episodes)
@@ -1120,7 +1120,7 @@ Deployment: Docker Compose (loom-engine, loom-dashboard, PostgreSQL, Ollama, Cad
     - Verify all 5 Docker containers operational
     - Verify dashboard functional with all 9 views
 
-  - [~] 25.5 Checkpoint - Final review
+  - [x] 25.5 Checkpoint - Final review
     - Review all implementation artifacts
     - Review test coverage and results
     - Review benchmark evaluation results

@@ -346,6 +346,84 @@ pub async fn append_source_episode(
     Ok(row)
 }
 
+// ---------------------------------------------------------------------------
+// Soft delete
+// ---------------------------------------------------------------------------
+
+/// Soft-delete an entity by setting `deleted_at` to the current time.
+///
+/// The row remains in the database but is excluded from normal queries
+/// (all retrieval functions filter `WHERE deleted_at IS NULL`). Returns
+/// the updated `Entity` row.
+pub async fn soft_delete_entity(
+    pool: &PgPool,
+    id: Uuid,
+    deletion_reason: Option<&str>,
+) -> Result<Entity, EntityError> {
+    // We store the deletion reason in the properties JSONB field since
+    // loom_entities doesn't have a dedicated deletion_reason column.
+    let row = if let Some(reason) = deletion_reason {
+        sqlx::query_as::<_, Entity>(
+            r#"
+            UPDATE loom_entities
+            SET deleted_at = now(),
+                properties = jsonb_set(
+                    COALESCE(properties, '{}'),
+                    '{deletion_reason}',
+                    to_jsonb($2::text)
+                )
+            WHERE id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(id)
+        .bind(reason)
+        .fetch_one(pool)
+        .await?
+    } else {
+        sqlx::query_as::<_, Entity>(
+            r#"
+            UPDATE loom_entities
+            SET deleted_at = now()
+            WHERE id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await?
+    };
+
+    Ok(row)
+}
+
+/// Query soft-deleted entities for audit purposes.
+///
+/// Returns entities where `deleted_at IS NOT NULL` in the given namespace,
+/// ordered by deletion time descending.
+pub async fn query_deleted_entities(
+    pool: &PgPool,
+    namespace: &str,
+    limit: i64,
+) -> Result<Vec<Entity>, EntityError> {
+    let rows = sqlx::query_as::<_, Entity>(
+        r#"
+        SELECT *
+        FROM loom_entities
+        WHERE namespace = $1
+          AND deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(namespace)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

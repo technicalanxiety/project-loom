@@ -78,3 +78,13 @@ ollama_data/
 # =========================
 caddy_data/
 caddy_config/
+
+# =========================
+# Proptest
+# =========================
+*.proptest-regressions
+
+# =========================
+# Claude / Kiro worktrees
+# =========================
+.claude/

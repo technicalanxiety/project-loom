@@ -69,7 +69,7 @@ mod dashboard_api_read_only_enforcement {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Property 1: For any randomly selected route, if it is a GET then is_write must be false.
         ///

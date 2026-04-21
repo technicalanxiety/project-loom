@@ -9,3 +9,4 @@ pub mod db;
 pub mod llm;
 pub mod pipeline;
 pub mod types;
+pub mod worker;

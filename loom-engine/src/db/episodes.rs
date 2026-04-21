@@ -309,6 +309,33 @@ pub async fn soft_delete_episode(
     Ok(row)
 }
 
+/// Query soft-deleted episodes for audit purposes.
+///
+/// Returns episodes where `deleted_at IS NOT NULL` in the given namespace,
+/// ordered by deletion time descending.
+pub async fn query_deleted_episodes(
+    pool: &PgPool,
+    namespace: &str,
+    limit: i64,
+) -> Result<Vec<Episode>, EpisodeError> {
+    let rows = sqlx::query_as::<_, Episode>(
+        r#"
+        SELECT *
+        FROM loom_episodes
+        WHERE namespace = $1
+          AND deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(namespace)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

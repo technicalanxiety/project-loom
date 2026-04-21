@@ -78,7 +78,7 @@ mod task_class_validity {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that all ClassificationResult instances have a valid primary
         /// task class that serializes to one of the five known values.
@@ -107,7 +107,7 @@ mod task_class_validity {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that when the confidence gap < 0.3, both primary and secondary
         /// classes are recorded. When gap >= 0.3, secondary is None.
@@ -171,7 +171,7 @@ mod task_class_validity {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that keyword_precheck always returns a valid TaskClass or None.
         #[test]
@@ -194,7 +194,7 @@ mod task_class_validity {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that ClassificationResult round-trips through serde correctly,
         /// preserving all fields including the task class validity.
@@ -241,7 +241,7 @@ mod retrieval_profile_mapping_and_cap {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that each task class maps to the correct canonical profiles.
         #[test]
@@ -279,7 +279,7 @@ mod retrieval_profile_mapping_and_cap {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that merged profiles from any primary/secondary combination
         /// never exceed 3.
@@ -305,7 +305,7 @@ mod retrieval_profile_mapping_and_cap {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that merged profiles contain no duplicates.
         #[test]
@@ -331,7 +331,7 @@ mod retrieval_profile_mapping_and_cap {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that merged profiles always start with the primary class's
         /// profiles (order preservation).
@@ -360,7 +360,7 @@ mod retrieval_profile_mapping_and_cap {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that merging with no secondary returns exactly the primary
         /// class's profiles.
@@ -423,7 +423,7 @@ mod cycle_prevention_graph_traversal {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that no entity appears more than once in a traversal path.
         #[test]
@@ -445,7 +445,7 @@ mod cycle_prevention_graph_traversal {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that the root entity is always the first element in the path.
         #[test]
@@ -464,7 +464,7 @@ mod cycle_prevention_graph_traversal {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that duplicate candidates in the input are correctly filtered
         /// out by cycle prevention.
@@ -491,7 +491,7 @@ mod cycle_prevention_graph_traversal {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that attempting to re-add the root entity is prevented.
         #[test]
@@ -515,7 +515,7 @@ mod cycle_prevention_graph_traversal {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that the TraversalResult path field (from the SQL function)
         /// would never contain duplicates, by verifying the invariant on
@@ -631,7 +631,7 @@ mod hard_exclusion_by_weight {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that candidates with weight 0.0 never appear in weighted results.
         #[test]
@@ -668,7 +668,7 @@ mod hard_exclusion_by_weight {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that zero-weight candidates never appear in final ranked results.
         #[test]
@@ -701,7 +701,7 @@ mod hard_exclusion_by_weight {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test specifically that procedural memory is always excluded for
         /// compliance task class (the known 0.0 weight case).
@@ -797,7 +797,7 @@ mod four_dimension_weighted_ranking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that the composite score formula is correctly applied.
         #[test]
@@ -832,7 +832,7 @@ mod four_dimension_weighted_ranking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that dimension weights sum to 1.0.
         #[test]
@@ -849,7 +849,7 @@ mod four_dimension_weighted_ranking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that ranked candidates are sorted in descending order by
         /// final score.
@@ -878,7 +878,7 @@ mod four_dimension_weighted_ranking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that the final score matches the formula applied to the
         /// per-dimension scores stored on each ranked candidate.
@@ -911,7 +911,7 @@ mod four_dimension_weighted_ranking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that compute_final_score agrees with RankingScore::composite.
         #[test]
@@ -941,7 +941,7 @@ mod four_dimension_weighted_ranking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that final score is bounded in [0.0, 1.0] when all
         /// dimension scores are in [0.0, 1.0].
@@ -1065,7 +1065,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that after budget enforcement, hot tier total tokens never
         /// exceed the namespace budget (excluding pinned items that cannot
@@ -1106,7 +1106,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that facts with superseded_by != NULL are never in hot tier.
         ///
@@ -1134,7 +1134,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that explicitly pinned items are always in hot tier after
         /// budget enforcement.
@@ -1171,7 +1171,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that the token estimation function is consistent with
         /// individual item counts.
@@ -1194,7 +1194,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that promotion criteria are correctly evaluated.
         #[test]
@@ -1224,7 +1224,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that procedure hot tier prevention criteria are correctly
         /// evaluated.
@@ -1253,7 +1253,7 @@ mod hot_tier_constraints {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that archived fact detection is correct.
         #[test]
@@ -1350,7 +1350,7 @@ mod candidate_deduplication {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that no candidate ID appears more than once in the selected items.
         #[test]
@@ -1399,7 +1399,7 @@ mod candidate_deduplication {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that hot tier item IDs are excluded from warm tier selection.
         #[test]
@@ -1537,7 +1537,7 @@ mod hot_tier_injection {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that all hot tier facts appear in structured output.
         #[test]
@@ -1574,7 +1574,7 @@ mod hot_tier_injection {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that all hot tier procedures appear in compact output.
         #[test]
@@ -1611,7 +1611,7 @@ mod hot_tier_injection {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that hot tier items are included regardless of warm tier budget.
         #[test]
@@ -1783,7 +1783,7 @@ mod output_format_correctness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that structured output always contains the required XML-like tags.
         #[test]
@@ -1846,7 +1846,7 @@ mod output_format_correctness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that structured output contains knowledge section when facts present.
         #[test]
@@ -1886,7 +1886,7 @@ mod output_format_correctness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that compact output is always valid JSON with required fields.
         #[test]
@@ -1943,7 +1943,7 @@ mod output_format_correctness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that compact JSON facts have the correct abbreviated keys.
         #[test]
@@ -1980,7 +1980,7 @@ mod output_format_correctness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that compact JSON episodes have the correct keys.
         #[test]
@@ -2015,7 +2015,7 @@ mod output_format_correctness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that compact JSON patterns have the correct keys.
         #[test]

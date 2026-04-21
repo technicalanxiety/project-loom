@@ -215,10 +215,25 @@ async fn poll_and_process(
 /// 9. Compute extraction metrics and store as JSONB.
 /// 10. Mark the episode as processed.
 ///
+/// # Error Handling
+///
+/// On failure, the episode remains unprocessed (`processed = false`) for
+/// retry on the next poll cycle. Transaction rollbacks are handled by
+/// leaving the episode in its unprocessed state. All errors are logged
+/// via tracing with span context.
+///
 /// # Errors
 ///
 /// Returns [`ProcessorError`] if any pipeline step fails. Errors are logged
 /// by the caller — the processing loop continues with other episodes.
+#[tracing::instrument(
+    skip(pool, client, config, episode),
+    fields(
+        episode_id = %episode.id,
+        namespace = %episode.namespace,
+        stage = "offline_process",
+    )
+)]
 pub async fn process_single_episode(
     pool: &PgPool,
     client: &LlmClient,
@@ -229,23 +244,37 @@ pub async fn process_single_episode(
 
     tracing::info!(episode_id = %episode_id, "starting full extraction pipeline");
 
-    let result = extract_pipeline::run_full_extraction_pipeline(
+    match extract_pipeline::run_full_extraction_pipeline(
         pool, client, config, episode,
     )
-    .await?;
-
-    tracing::info!(
-        episode_id = %episode_id,
-        entities = result.entity_count,
-        facts = result.fact_count,
-        facts_skipped = result.facts_skipped,
-        superseded = result.superseded_count,
-        conflicts = result.conflict_count,
-        processing_time_ms = result.metrics.processing_time_ms,
-        "episode processing complete via full extraction pipeline"
-    );
-
-    Ok(())
+    .await
+    {
+        Ok(result) => {
+            tracing::info!(
+                episode_id = %episode_id,
+                entities = result.entity_count,
+                facts = result.fact_count,
+                facts_skipped = result.facts_skipped,
+                superseded = result.superseded_count,
+                conflicts = result.conflict_count,
+                processing_time_ms = result.metrics.processing_time_ms,
+                "episode processing complete via full extraction pipeline"
+            );
+            Ok(())
+        }
+        Err(e) => {
+            // Episode remains unprocessed (processed=false) for retry.
+            // Log the error with full context for debugging.
+            tracing::error!(
+                episode_id = %episode_id,
+                namespace = %episode.namespace,
+                source = %episode.source,
+                error = %e,
+                "episode processing failed — episode queued for retry"
+            );
+            Err(ProcessorError::Pipeline(e))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +608,7 @@ mod tests {
             }),
             superseded_count: 0,
             model: "gemma4:26b-a4b-q4".to_string(),
+            valid_extracted_facts: vec![],
         };
 
         let evidence = vec![

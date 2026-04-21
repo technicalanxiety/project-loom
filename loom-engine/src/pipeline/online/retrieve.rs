@@ -179,6 +179,10 @@ pub enum RetrievalError {
     /// A graph traversal error.
     #[error("traversal error: {0}")]
     Traverse(#[from] crate::db::traverse::TraverseError),
+
+    /// A profile execution timed out.
+    #[error("profile timed out: {0}")]
+    Timeout(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -765,6 +769,16 @@ struct ProcedureRow {
 /// * `namespace` — Namespace isolation boundary.
 /// * `query_terms` — Tokenized query terms for entity matching and boosting.
 /// * `task_class` — Active task class (used by procedure_assist exclusion).
+/// Default timeout for individual profile execution (5 seconds).
+const PROFILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Default ranking score used when a dimension computation fails.
+pub const DEFAULT_RANKING_SCORE: f64 = 0.5;
+
+#[tracing::instrument(
+    skip(pool, query_embedding, query_terms),
+    fields(stage = "retrieve", profile_count = profiles.len())
+)]
 pub async fn execute_profiles(
     pool: &PgPool,
     profiles: &[RetrievalProfile],
@@ -782,12 +796,26 @@ pub async fn execute_profiles(
     let run_graph_neighborhood = profiles.contains(&RetrievalProfile::GraphNeighborhood);
     let run_procedure_assist = profiles.contains(&RetrievalProfile::ProcedureAssist);
 
-    // Execute all active profiles in parallel.
+    // Execute all active profiles in parallel with per-profile timeouts.
     let (fact_result, episode_result, graph_result, procedure_result) = tokio::join!(
         async {
             if run_fact_lookup {
                 let t = std::time::Instant::now();
-                let res = execute_fact_lookup(pool, query_embedding, namespace, query_terms).await;
+                let res = tokio::time::timeout(
+                    PROFILE_TIMEOUT,
+                    execute_fact_lookup(pool, query_embedding, namespace, query_terms),
+                ).await;
+                let res = match res {
+                    Ok(inner) => inner,
+                    Err(_) => {
+                        tracing::warn!(
+                            profile = "fact_lookup",
+                            timeout_secs = PROFILE_TIMEOUT.as_secs(),
+                            "profile execution timed out, continuing with other profiles"
+                        );
+                        Err(RetrievalError::Timeout("fact_lookup timed out".into()))
+                    }
+                };
                 Some((res, t.elapsed()))
             } else {
                 None
@@ -796,7 +824,21 @@ pub async fn execute_profiles(
         async {
             if run_episode_recall {
                 let t = std::time::Instant::now();
-                let res = execute_episode_recall(pool, query_embedding, namespace).await;
+                let res = tokio::time::timeout(
+                    PROFILE_TIMEOUT,
+                    execute_episode_recall(pool, query_embedding, namespace),
+                ).await;
+                let res = match res {
+                    Ok(inner) => inner,
+                    Err(_) => {
+                        tracing::warn!(
+                            profile = "episode_recall",
+                            timeout_secs = PROFILE_TIMEOUT.as_secs(),
+                            "profile execution timed out, continuing with other profiles"
+                        );
+                        Err(RetrievalError::Timeout("episode_recall timed out".into()))
+                    }
+                };
                 Some((res, t.elapsed()))
             } else {
                 None
@@ -805,7 +847,21 @@ pub async fn execute_profiles(
         async {
             if run_graph_neighborhood {
                 let t = std::time::Instant::now();
-                let res = execute_graph_neighborhood(pool, namespace, query_terms).await;
+                let res = tokio::time::timeout(
+                    PROFILE_TIMEOUT,
+                    execute_graph_neighborhood(pool, namespace, query_terms),
+                ).await;
+                let res = match res {
+                    Ok(inner) => inner,
+                    Err(_) => {
+                        tracing::warn!(
+                            profile = "graph_neighborhood",
+                            timeout_secs = PROFILE_TIMEOUT.as_secs(),
+                            "profile execution timed out, continuing with other profiles"
+                        );
+                        Err(RetrievalError::Timeout("graph_neighborhood timed out".into()))
+                    }
+                };
                 Some((res, t.elapsed()))
             } else {
                 None
@@ -814,7 +870,21 @@ pub async fn execute_profiles(
         async {
             if run_procedure_assist {
                 let t = std::time::Instant::now();
-                let res = execute_procedure_assist(pool, namespace, task_class).await;
+                let res = tokio::time::timeout(
+                    PROFILE_TIMEOUT,
+                    execute_procedure_assist(pool, namespace, task_class),
+                ).await;
+                let res = match res {
+                    Ok(inner) => inner,
+                    Err(_) => {
+                        tracing::warn!(
+                            profile = "procedure_assist",
+                            timeout_secs = PROFILE_TIMEOUT.as_secs(),
+                            "profile execution timed out, continuing with other profiles"
+                        );
+                        Err(RetrievalError::Timeout("procedure_assist timed out".into()))
+                    }
+                };
                 Some((res, t.elapsed()))
             } else {
                 None

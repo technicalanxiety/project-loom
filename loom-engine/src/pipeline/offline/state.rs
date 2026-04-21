@@ -1022,6 +1022,7 @@ mod tests {
             }),
             superseded_count: 1,
             model: "gemma4:26b".to_string(),
+            valid_extracted_facts: vec![],
         };
 
         let evidence = vec![

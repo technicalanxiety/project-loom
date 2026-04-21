@@ -277,6 +277,33 @@ pub async fn soft_delete_fact(
     Ok(row)
 }
 
+/// Query soft-deleted facts for audit purposes.
+///
+/// Returns facts where `deleted_at IS NOT NULL` in the given namespace,
+/// ordered by deletion time descending.
+pub async fn query_deleted_facts(
+    pool: &PgPool,
+    namespace: &str,
+    limit: i64,
+) -> Result<Vec<Fact>, FactError> {
+    let rows = sqlx::query_as::<_, Fact>(
+        r#"
+        SELECT *
+        FROM loom_facts
+        WHERE namespace = $1
+          AND deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(namespace)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 // ---------------------------------------------------------------------------
 // Fact state upsert
 // ---------------------------------------------------------------------------

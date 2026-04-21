@@ -1,9 +1,11 @@
 //! REST API endpoints for non-MCP clients.
 //!
-//! Exposes two endpoints:
+//! Exposes three endpoints:
 //!
 //! - **POST /api/learn** — manual episode submission. Identical logic to
 //!   `loom_learn` but forces `source = "manual"` regardless of the request body.
+//! - **POST /api/webhooks/github** — GitHub webhook connector. Ingests pull
+//!   request comment and issue comment events as episodes.
 //! - **GET /api/health** — unauthenticated health check returning database and
 //!   Ollama connectivity status.
 
@@ -11,10 +13,11 @@ use std::time::{Duration, Instant};
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -185,6 +188,196 @@ pub async fn handle_api_learn(
 }
 
 // ---------------------------------------------------------------------------
+// GitHub webhook types
+// ---------------------------------------------------------------------------
+
+/// Supported GitHub webhook event types.
+const GITHUB_EVENT_ISSUE_COMMENT: &str = "issue_comment";
+const GITHUB_EVENT_PR_REVIEW_COMMENT: &str = "pull_request_review_comment";
+
+/// GitHub webhook payload for issue comment and PR review comment events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubWebhookPayload {
+    /// The action that was performed (e.g. "created", "edited", "deleted").
+    pub action: String,
+    /// The comment object containing the body and metadata.
+    pub comment: GitHubComment,
+    /// The repository where the event occurred.
+    pub repository: GitHubRepository,
+    /// The user who triggered the event.
+    pub sender: GitHubUser,
+}
+
+/// A GitHub comment (issue comment or PR review comment).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubComment {
+    /// Unique numeric identifier for the comment.
+    pub id: i64,
+    /// The comment body text.
+    pub body: String,
+    /// ISO 8601 timestamp when the comment was created.
+    pub created_at: DateTime<Utc>,
+    /// URL to the comment on GitHub.
+    #[serde(default)]
+    pub html_url: Option<String>,
+}
+
+/// A GitHub repository reference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubRepository {
+    /// Full repository name including owner (e.g. "owner/repo").
+    pub full_name: String,
+    /// Short repository name without owner.
+    pub name: String,
+}
+
+/// A GitHub user reference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubUser {
+    /// GitHub username.
+    pub login: String,
+}
+
+/// Resolve a namespace from a GitHub repository full name.
+///
+/// Uses the repository `full_name` (e.g. "owner/repo") directly as the
+/// namespace, preserving the owner context for isolation.
+fn resolve_namespace_from_repo(full_name: &str) -> String {
+    full_name.to_string()
+}
+
+/// Build a `source_event_id` from the GitHub event type and comment ID.
+///
+/// Format: `{event_type}:{comment_id}` to ensure uniqueness across event
+/// types (an issue comment and PR comment could theoretically share an ID).
+fn build_source_event_id(event_type: &str, comment_id: i64) -> String {
+    format!("{event_type}:{comment_id}")
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webhooks/github
+// ---------------------------------------------------------------------------
+
+/// Handle `POST /api/webhooks/github` — GitHub webhook event ingestion.
+///
+/// Accepts GitHub webhook payloads for `issue_comment` and
+/// `pull_request_review_comment` events. The event type is determined from
+/// the `X-GitHub-Event` header.
+///
+/// # Idempotency
+///
+/// 1. Content-hash + namespace check — catches identical content.
+/// 2. `(source, source_event_id)` unique constraint via
+///    [`episodes::insert_episode`] using `github:{event_type}:{comment_id}`.
+///
+/// Returns [`LearnResponse`] with the episode UUID and status.
+pub async fn handle_github_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<GitHubWebhookPayload>,
+) -> Result<Json<LearnResponse>, RestError> {
+    // Read the X-GitHub-Event header to determine event type.
+    let event_type = headers
+        .get("X-GitHub-Event")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            RestError::InvalidRequest("missing X-GitHub-Event header".into())
+        })?;
+
+    // Only accept supported event types.
+    if event_type != GITHUB_EVENT_ISSUE_COMMENT
+        && event_type != GITHUB_EVENT_PR_REVIEW_COMMENT
+    {
+        return Err(RestError::InvalidRequest(format!(
+            "unsupported GitHub event type: {event_type}; \
+             expected 'issue_comment' or 'pull_request_review_comment'"
+        )));
+    }
+
+    // Validate comment body is not empty.
+    if payload.comment.body.trim().is_empty() {
+        return Err(RestError::InvalidRequest(
+            "comment body must not be empty".into(),
+        ));
+    }
+
+    let namespace = resolve_namespace_from_repo(&payload.repository.full_name);
+    let source_event_id = build_source_event_id(event_type, payload.comment.id);
+    let content_hash = compute_content_hash(&payload.comment.body);
+    let occurred_at = payload.comment.created_at;
+    let participants = vec![payload.sender.login.clone()];
+
+    // Build metadata from the webhook payload.
+    let metadata = serde_json::json!({
+        "github_event": event_type,
+        "action": payload.action,
+        "comment_id": payload.comment.id,
+        "html_url": payload.comment.html_url,
+        "repository": payload.repository.full_name,
+    });
+
+    // Idempotency check: content_hash + namespace.
+    let existing_by_hash: Option<crate::types::episode::Episode> = sqlx::query_as(
+        "SELECT * FROM loom_episodes WHERE content_hash = $1 AND namespace = $2 LIMIT 1",
+    )
+    .bind(&content_hash)
+    .bind(&namespace)
+    .fetch_optional(&state.pools.offline)
+    .await
+    .map_err(|e| RestError::Database(e.to_string()))?;
+
+    if let Some(existing) = existing_by_hash {
+        tracing::info!(
+            episode_id = %existing.id,
+            namespace = %namespace,
+            source_event_id = %source_event_id,
+            "github_webhook: duplicate episode (content_hash match)"
+        );
+        return Ok(Json(LearnResponse {
+            episode_id: existing.id,
+            status: "duplicate".to_string(),
+        }));
+    }
+
+    // Insert episode — insert_episode handles (source, source_event_id) dedup.
+    let new_ep = NewEpisode {
+        source: "github".to_string(),
+        source_id: None,
+        source_event_id: Some(source_event_id.clone()),
+        content: payload.comment.body.clone(),
+        content_hash,
+        occurred_at,
+        namespace: namespace.clone(),
+        metadata: Some(metadata),
+        participants: Some(participants),
+    };
+
+    let episode = episodes::insert_episode(&state.pools.offline, &new_ep)
+        .await
+        .map_err(|e| RestError::Database(e.to_string()))?;
+
+    let status = if episode.processed.unwrap_or(false) {
+        "duplicate"
+    } else {
+        "queued"
+    };
+
+    tracing::info!(
+        episode_id = %episode.id,
+        namespace = %namespace,
+        event_type = %event_type,
+        source_event_id = %source_event_id,
+        status,
+        "github_webhook: episode ingested"
+    );
+
+    Ok(Json(LearnResponse {
+        episode_id: episode.id,
+        status: status.to_string(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/health
 // ---------------------------------------------------------------------------
 
@@ -293,6 +486,7 @@ async fn probe_ollama(base_url: &str, timeout: Duration) -> ComponentStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     // -- compute_content_hash -----------------------------------------------
 
@@ -572,5 +766,223 @@ mod tests {
         assert!(json.get("ollama").is_some(), "ollama field must be present");
         assert!(json.get("status").is_some(), "status field must be present");
         assert!(json.get("version").is_some(), "version field must be present");
+    }
+
+    // -- GitHub webhook payload deserialization -----------------------------
+
+    /// Helper to build a minimal valid issue_comment payload JSON string.
+    fn sample_issue_comment_json() -> String {
+        serde_json::json!({
+            "action": "created",
+            "comment": {
+                "id": 12345,
+                "body": "Looks good to me, let's merge this.",
+                "created_at": "2025-01-15T10:30:00Z",
+                "html_url": "https://github.com/owner/repo/issues/1#issuecomment-12345"
+            },
+            "repository": {
+                "full_name": "owner/repo",
+                "name": "repo"
+            },
+            "sender": {
+                "login": "octocat"
+            }
+        })
+        .to_string()
+    }
+
+    /// Helper to build a minimal valid pull_request_review_comment payload.
+    fn sample_pr_review_comment_json() -> String {
+        serde_json::json!({
+            "action": "created",
+            "comment": {
+                "id": 67890,
+                "body": "This function needs better error handling.",
+                "created_at": "2025-02-20T14:00:00Z",
+                "html_url": "https://github.com/org/project/pull/42#discussion_r67890"
+            },
+            "repository": {
+                "full_name": "org/project",
+                "name": "project"
+            },
+            "sender": {
+                "login": "reviewer"
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn github_issue_comment_payload_deserializes() {
+        let json = sample_issue_comment_json();
+        let payload: GitHubWebhookPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload.action, "created");
+        assert_eq!(payload.comment.id, 12345);
+        assert_eq!(payload.comment.body, "Looks good to me, let's merge this.");
+        assert_eq!(payload.repository.full_name, "owner/repo");
+        assert_eq!(payload.repository.name, "repo");
+        assert_eq!(payload.sender.login, "octocat");
+    }
+
+    #[test]
+    fn github_pr_review_comment_payload_deserializes() {
+        let json = sample_pr_review_comment_json();
+        let payload: GitHubWebhookPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload.action, "created");
+        assert_eq!(payload.comment.id, 67890);
+        assert_eq!(
+            payload.comment.body,
+            "This function needs better error handling."
+        );
+        assert_eq!(payload.repository.full_name, "org/project");
+        assert_eq!(payload.sender.login, "reviewer");
+    }
+
+    #[test]
+    fn github_payload_extracts_occurred_at_from_created_at() {
+        let json = sample_issue_comment_json();
+        let payload: GitHubWebhookPayload = serde_json::from_str(&json).unwrap();
+        // created_at should parse to 2025-01-15T10:30:00Z
+        assert_eq!(payload.comment.created_at.year(), 2025);
+        assert_eq!(payload.comment.created_at.month(), 1);
+        assert_eq!(payload.comment.created_at.day(), 15);
+    }
+
+    #[test]
+    fn github_payload_html_url_is_optional() {
+        let json = serde_json::json!({
+            "action": "created",
+            "comment": {
+                "id": 99,
+                "body": "test",
+                "created_at": "2025-01-01T00:00:00Z"
+            },
+            "repository": {
+                "full_name": "a/b",
+                "name": "b"
+            },
+            "sender": {
+                "login": "user"
+            }
+        })
+        .to_string();
+        let payload: GitHubWebhookPayload = serde_json::from_str(&json).unwrap();
+        assert!(payload.comment.html_url.is_none());
+    }
+
+    // -- Namespace resolution from repository full_name --------------------
+
+    #[test]
+    fn namespace_from_repo_uses_full_name() {
+        let ns = resolve_namespace_from_repo("owner/repo");
+        assert_eq!(ns, "owner/repo");
+    }
+
+    #[test]
+    fn namespace_from_repo_preserves_org_prefix() {
+        let ns = resolve_namespace_from_repo("my-org/my-project");
+        assert_eq!(ns, "my-org/my-project");
+    }
+
+    #[test]
+    fn namespace_from_repo_handles_nested_names() {
+        // GitHub doesn't actually allow nested names, but verify no panic.
+        let ns = resolve_namespace_from_repo("a/b/c");
+        assert_eq!(ns, "a/b/c");
+    }
+
+    // -- Participant extraction from sender --------------------------------
+
+    #[test]
+    fn participant_extracted_from_sender_login() {
+        let json = sample_issue_comment_json();
+        let payload: GitHubWebhookPayload = serde_json::from_str(&json).unwrap();
+        let participants = vec![payload.sender.login.clone()];
+        assert_eq!(participants, vec!["octocat"]);
+    }
+
+    #[test]
+    fn participant_from_pr_review_sender() {
+        let json = sample_pr_review_comment_json();
+        let payload: GitHubWebhookPayload = serde_json::from_str(&json).unwrap();
+        let participants = vec![payload.sender.login.clone()];
+        assert_eq!(participants, vec!["reviewer"]);
+    }
+
+    // -- source_event_id construction from comment id ----------------------
+
+    #[test]
+    fn source_event_id_from_issue_comment() {
+        let id = build_source_event_id("issue_comment", 12345);
+        assert_eq!(id, "issue_comment:12345");
+    }
+
+    #[test]
+    fn source_event_id_from_pr_review_comment() {
+        let id = build_source_event_id("pull_request_review_comment", 67890);
+        assert_eq!(id, "pull_request_review_comment:67890");
+    }
+
+    #[test]
+    fn source_event_id_different_types_produce_different_ids() {
+        let id1 = build_source_event_id("issue_comment", 100);
+        let id2 = build_source_event_id("pull_request_review_comment", 100);
+        assert_ne!(
+            id1, id2,
+            "same comment ID with different event types must produce different source_event_ids"
+        );
+    }
+
+    // -- Unsupported event type rejection ----------------------------------
+
+    #[test]
+    fn unsupported_event_type_is_detected() {
+        let event_type = "push";
+        let is_supported = event_type == GITHUB_EVENT_ISSUE_COMMENT
+            || event_type == GITHUB_EVENT_PR_REVIEW_COMMENT;
+        assert!(!is_supported, "push events should not be supported");
+    }
+
+    #[test]
+    fn issue_comment_event_type_is_supported() {
+        let is_supported = GITHUB_EVENT_ISSUE_COMMENT == "issue_comment";
+        assert!(is_supported);
+    }
+
+    #[test]
+    fn pr_review_comment_event_type_is_supported() {
+        let is_supported = GITHUB_EVENT_PR_REVIEW_COMMENT == "pull_request_review_comment";
+        assert!(is_supported);
+    }
+
+    #[test]
+    fn unsupported_event_types_rejected() {
+        let unsupported = ["push", "pull_request", "issues", "create", "delete", "star"];
+        for event in &unsupported {
+            let is_supported = *event == GITHUB_EVENT_ISSUE_COMMENT
+                || *event == GITHUB_EVENT_PR_REVIEW_COMMENT;
+            assert!(
+                !is_supported,
+                "event type '{}' should not be supported",
+                event
+            );
+        }
+    }
+
+    // -- GitHub webhook content hash ----------------------------------------
+
+    #[test]
+    fn github_comment_content_hash_is_deterministic() {
+        let body = "Looks good to me, let's merge this.";
+        let h1 = compute_content_hash(body);
+        let h2 = compute_content_hash(body);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn github_different_comments_produce_different_hashes() {
+        let h1 = compute_content_hash("LGTM");
+        let h2 = compute_content_hash("Needs changes");
+        assert_ne!(h1, h2);
     }
 }

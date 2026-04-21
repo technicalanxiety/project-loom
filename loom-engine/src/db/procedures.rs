@@ -192,6 +192,174 @@ pub async fn update_observation(
     Ok(())
 }
 
+/// Update the confidence score on a procedure.
+pub async fn update_confidence(
+    pool: &PgPool,
+    procedure_id: Uuid,
+    confidence: f64,
+) -> Result<(), ProcedureError> {
+    sqlx::query(
+        r#"
+        UPDATE loom_procedures
+        SET confidence = $2
+        WHERE id = $1
+        "#,
+    )
+    .bind(procedure_id)
+    .bind(confidence)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Promote a procedure from `extracted` to `promoted` evidence status.
+///
+/// Only promotes procedures that are currently in `extracted` status.
+/// Returns the number of rows affected (0 or 1).
+pub async fn promote_to_promoted(
+    pool: &PgPool,
+    procedure_id: Uuid,
+) -> Result<u64, ProcedureError> {
+    let result = sqlx::query(
+        r#"
+        UPDATE loom_procedures
+        SET evidence_status = 'promoted'
+        WHERE id = $1
+          AND evidence_status = 'extracted'
+        "#,
+    )
+    .bind(procedure_id)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
+/// Store or update a 768-dimension embedding on a procedure record.
+pub async fn store_embedding(
+    pool: &PgPool,
+    procedure_id: Uuid,
+    embedding: &pgvector::Vector,
+) -> Result<(), ProcedureError> {
+    sqlx::query(
+        r#"
+        UPDATE loom_procedures
+        SET embedding = $2
+        WHERE id = $1
+        "#,
+    )
+    .bind(procedure_id)
+    .bind(embedding)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Query procedures eligible for promotion.
+///
+/// Returns procedures with `evidence_status = 'extracted'`, `confidence >= min_confidence`,
+/// and `observation_count >= min_observations`. Used by the scheduler to
+/// batch-promote eligible procedures.
+pub async fn get_promotion_candidates(
+    pool: &PgPool,
+    min_confidence: f64,
+    min_observations: i32,
+) -> Result<Vec<Procedure>, ProcedureError> {
+    let rows = sqlx::query_as::<_, Procedure>(
+        r#"
+        SELECT *
+        FROM loom_procedures
+        WHERE evidence_status = 'extracted'
+          AND confidence >= $1
+          AND observation_count >= $2
+          AND deleted_at IS NULL
+        ORDER BY confidence DESC
+        "#,
+    )
+    .bind(min_confidence)
+    .bind(min_observations)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Get a single procedure by ID.
+pub async fn get_procedure_by_id(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<Procedure>, ProcedureError> {
+    let row = sqlx::query_as::<_, Procedure>(
+        r#"
+        SELECT *
+        FROM loom_procedures
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}
+
+// ---------------------------------------------------------------------------
+// Soft delete
+// ---------------------------------------------------------------------------
+
+/// Soft-delete a procedure by setting `deleted_at` to the current time.
+///
+/// The row remains in the database but is excluded from normal queries
+/// (all retrieval functions filter `WHERE deleted_at IS NULL`). Returns
+/// the updated `Procedure` row.
+pub async fn soft_delete_procedure(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Procedure, ProcedureError> {
+    let row = sqlx::query_as::<_, Procedure>(
+        r#"
+        UPDATE loom_procedures
+        SET deleted_at = now()
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Query soft-deleted procedures for audit purposes.
+///
+/// Returns procedures where `deleted_at IS NOT NULL` in the given namespace,
+/// ordered by deletion time descending.
+pub async fn query_deleted_procedures(
+    pool: &PgPool,
+    namespace: &str,
+    limit: i64,
+) -> Result<Vec<Procedure>, ProcedureError> {
+    let rows = sqlx::query_as::<_, Procedure>(
+        r#"
+        SELECT *
+        FROM loom_procedures
+        WHERE namespace = $1
+          AND deleted_at IS NOT NULL
+        ORDER BY deleted_at DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(namespace)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +368,44 @@ mod tests {
     fn procedure_error_displays_message() {
         let err = ProcedureError::Sqlx(sqlx::Error::RowNotFound);
         assert!(err.to_string().contains("database error"));
+    }
+
+    #[test]
+    fn new_procedure_fields() {
+        let new_proc = NewProcedure {
+            pattern: "When debugging, check logs first".to_string(),
+            category: Some("operational".to_string()),
+            namespace: "default".to_string(),
+            source_episodes: vec![Uuid::new_v4()],
+            evidence_status: "extracted".to_string(),
+            confidence: 0.3,
+        };
+        assert_eq!(new_proc.pattern, "When debugging, check logs first");
+        assert_eq!(new_proc.category.as_deref(), Some("operational"));
+        assert_eq!(new_proc.namespace, "default");
+        assert_eq!(new_proc.evidence_status, "extracted");
+        assert!((new_proc.confidence - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn procedure_struct_debug_format() {
+        let proc = Procedure {
+            id: Uuid::new_v4(),
+            pattern: "test pattern".to_string(),
+            category: Some("general".to_string()),
+            namespace: "default".to_string(),
+            source_episodes: vec![],
+            first_observed: None,
+            last_observed: None,
+            observation_count: Some(1),
+            evidence_status: "extracted".to_string(),
+            confidence: Some(0.3),
+            embedding: None,
+            tier: Some("warm".to_string()),
+            deleted_at: None,
+        };
+        let debug = format!("{proc:?}");
+        assert!(debug.contains("test pattern"));
+        assert!(debug.contains("extracted"));
     }
 }

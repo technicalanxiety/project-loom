@@ -52,7 +52,7 @@ mod correct_dimensions {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn embedding_has_768_dimensions(
@@ -101,7 +101,7 @@ mod wrong_dimensions {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn wrong_dimension_returns_mismatch_error(

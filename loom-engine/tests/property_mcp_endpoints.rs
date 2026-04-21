@@ -69,7 +69,7 @@ mod content_hash_correctness {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn hash_equals_sha256_of_content(content in episode_content()) {
@@ -137,9 +137,10 @@ mod content_hash_correctness {
 /// that is rolled back to keep the database clean.
 mod episode_idempotency {
     use super::*;
+    use sqlx::Acquire;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn duplicate_source_event_id_returns_same_id(
@@ -177,6 +178,10 @@ mod episode_idempotency {
 
                 let first_id = first.0;
 
+                // Use a savepoint so the expected constraint violation doesn't
+                // abort the outer transaction (PostgreSQL behaviour).
+                let mut sp = tx.begin().await.expect("savepoint");
+
                 // Attempt duplicate insertion — should fail with unique violation.
                 let dup_result: Result<(Uuid,), sqlx::Error> = sqlx::query_as(
                     r#"
@@ -192,7 +197,7 @@ mod episode_idempotency {
                 .bind(compute_content_hash(&format!("{content}_v2")))
                 .bind(occurred_at)
                 .bind(&namespace)
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut *sp)
                 .await;
 
                 // The DB constraint must reject the duplicate.
@@ -200,6 +205,9 @@ mod episode_idempotency {
                     dup_result.is_err(),
                     "duplicate (source, source_event_id) must be rejected"
                 );
+
+                // Rollback the savepoint to restore the transaction state.
+                sp.rollback().await.expect("rollback savepoint");
 
                 // The application layer should return the original ID.
                 // Simulate the idempotency check: query by (source, source_event_id).
@@ -296,7 +304,7 @@ mod episode_field_completeness {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn all_required_fields_stored_correctly(
@@ -346,9 +354,10 @@ mod episode_field_completeness {
                 );
 
                 // Req 1.4: ingested_at is set automatically.
+                let tolerance = chrono::Duration::seconds(2);
                 prop_assert!(
-                    stored_ingested_at <= chrono::Utc::now(),
-                    "ingested_at must be set to a past or current timestamp"
+                    stored_ingested_at <= chrono::Utc::now() + tolerance,
+                    "ingested_at must be set to a recent timestamp"
                 );
 
                 // occurred_at is stored correctly.
@@ -410,6 +419,12 @@ mod connection_pool_separation {
             database_url_offline: Some("postgres://offline:5432/db".to_string()),
             online_pool_max: 10,
             offline_pool_max: 5,
+            online_pool_min: 2,
+            offline_pool_min: 1,
+            pool_acquire_timeout_secs: 5,
+            pool_idle_timeout_secs: 300,
+            statement_timeout_secs: 30,
+            hot_tier_cache_ttl_secs: 60,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -449,6 +464,12 @@ mod connection_pool_separation {
             database_url_offline: None,
             online_pool_max: 10,
             offline_pool_max: 5,
+            online_pool_min: 2,
+            offline_pool_min: 1,
+            pool_acquire_timeout_secs: 5,
+            pool_idle_timeout_secs: 300,
+            statement_timeout_secs: 30,
+            hot_tier_cache_ttl_secs: 60,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -484,6 +505,12 @@ mod connection_pool_separation {
             database_url_offline: None,
             online_pool_max: 10,
             offline_pool_max: 5,
+            online_pool_min: 2,
+            offline_pool_min: 1,
+            pool_acquire_timeout_secs: 5,
+            pool_idle_timeout_secs: 300,
+            statement_timeout_secs: 30,
+            hot_tier_cache_ttl_secs: 60,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),

@@ -82,12 +82,16 @@ pub enum McpError {
 
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+
+    #[error("service unavailable: {0}")]
+    ServiceUnavailable(String),
 }
 
 impl IntoResponse for McpError {
     fn into_response(self) -> Response {
         let status = match &self {
             McpError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            McpError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let body = serde_json::json!({ "error": self.to_string() });
@@ -127,6 +131,7 @@ pub fn compute_content_hash(content: &str) -> String {
 ///    event IDs.
 ///
 /// Both checks return the existing episode ID with status `"duplicate"`.
+#[tracing::instrument(skip(state, req), fields(endpoint = "loom_learn"))]
 pub async fn handle_loom_learn(
     State(state): State<AppState>,
     Json(req): Json<LearnRequest>,
@@ -222,6 +227,7 @@ pub async fn handle_loom_learn(
 /// 7. Compile context package (structured XML or compact JSON).
 /// 8. Write audit log entry.
 /// 9. Return context package with token count and compilation ID.
+#[tracing::instrument(skip(state, req), fields(endpoint = "loom_think"))]
 pub async fn handle_loom_think(
     State(state): State<AppState>,
     Json(req): Json<ThinkRequest>,
@@ -262,9 +268,18 @@ pub async fn handle_loom_think(
             }
         }
     } else {
-        classify::classify_query(&state.llm_client, &state.config.llm, &req.query)
-            .await
-            .map_err(|e| McpError::Classification(e.to_string()))?
+        match classify::classify_query(&state.llm_client, &state.config.llm, &req.query).await {
+            Ok(output) => output,
+            Err(e) => {
+                // Classification failure: default to TaskClass::Chat.
+                tracing::warn!(
+                    error = %e,
+                    query = %req.query,
+                    "classification failed, defaulting to TaskClass::Chat"
+                );
+                classify::apply_override(TaskClass::Chat)
+            }
+        }
     };
 
     let latency_classify_ms = classify_start.elapsed().as_millis() as i32;

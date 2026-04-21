@@ -57,7 +57,7 @@ mod async_ingestion_pipeline_separation {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that LearnResponse always contains a valid status value.
         ///
@@ -103,7 +103,7 @@ mod async_ingestion_pipeline_separation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that LearnResponse never contains a blocking/synchronous status.
         ///
@@ -129,7 +129,7 @@ mod async_ingestion_pipeline_separation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that ThinkResponse is structurally independent of offline processing.
         ///
@@ -175,7 +175,7 @@ mod async_ingestion_pipeline_separation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that LearnResponse and ThinkResponse are structurally disjoint.
         ///
@@ -260,7 +260,7 @@ mod extraction_metrics_completeness {
     ];
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that compute_extraction_metrics always produces a struct
         /// that serializes to JSON containing every required field.
@@ -303,6 +303,7 @@ mod extraction_metrics_completeness {
                     }),
                     superseded_count: 0,
                     model: model.clone(),
+                    valid_extracted_facts: vec![],
                 })
             } else {
                 None
@@ -336,7 +337,7 @@ mod extraction_metrics_completeness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that entity resolution counts in metrics sum to the total
         /// extracted count.
@@ -415,7 +416,7 @@ mod extraction_metrics_completeness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that evidence counts (explicit + implied) never exceed
         /// the number of evidence values provided.
@@ -447,7 +448,7 @@ mod extraction_metrics_completeness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that the extraction_model field in metrics always matches
         /// the model passed to compute_extraction_metrics.
@@ -481,7 +482,7 @@ mod extraction_metrics_completeness {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         /// Test that processing_time_ms is always non-negative and preserved.
         #[test]

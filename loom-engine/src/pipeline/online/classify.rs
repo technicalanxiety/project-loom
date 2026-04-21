@@ -71,6 +71,7 @@ pub struct ClassifyStageOutput {
 /// fails. On LLM parse failures the classification module itself defaults
 /// to [`TaskClass::Chat`], so errors here typically indicate network or
 /// infrastructure issues.
+#[tracing::instrument(skip(client, config), fields(stage = "classify"))]
 pub async fn classify_query(
     client: &LlmClient,
     config: &LlmConfig,

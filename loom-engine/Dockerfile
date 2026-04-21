@@ -32,22 +32,24 @@ COPY prompts/ prompts/
 RUN cargo build --release --target x86_64-unknown-linux-musl && \
     strip /build/target/x86_64-unknown-linux-musl/release/loom-engine
 
-# ── Stage 2: Runtime (distroless / scratch) ───────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+# ── Stage 2: Runtime (minimal Debian for shell + health checks) ─
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/loom-engine /loom-engine
 COPY --from=builder /build/migrations/ /app/migrations/
 COPY --from=builder /build/prompts/   /app/prompts/
 
-# CA certificates for outbound HTTPS (Azure OpenAI fallback)
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
 WORKDIR /app
 
 EXPOSE 8080
 
-# Health check — distroless has no shell, so Docker HEALTHCHECK
-# is configured in docker-compose.yml via curl on the host side.
-# The /api/health endpoint is served by axum inside the binary.
+# Health check — curl is available in the runtime image for
+# Docker HEALTHCHECK and docker-compose health checks.
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+    CMD curl -sf http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["/loom-engine"]

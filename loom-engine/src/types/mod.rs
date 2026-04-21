@@ -4,6 +4,7 @@
 //! serialization. Database row types derive `sqlx::FromRow`.
 
 pub mod audit;
+pub mod benchmark;
 pub mod classification;
 pub mod compilation;
 pub mod entity;

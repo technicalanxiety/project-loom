@@ -1415,7 +1415,7 @@ pub async fn handle_metrics_retrieval(
     // Daily precision: avg(selected/found) per day over last 30 days
     let precision_rows: Vec<DailyMetricRow> = sqlx::query_as(
         r#"
-        SELECT DATE(created_at)::text AS date,
+        SELECT DATE(created_at) AS date,
                AVG(CASE WHEN candidates_found > 0
                    THEN candidates_selected::float / candidates_found::float
                    ELSE 0 END) AS value
@@ -1481,10 +1481,10 @@ pub async fn handle_metrics_extraction(
         SELECT
           COALESCE(extraction_model, 'unknown') AS model,
           COUNT(*) AS episode_count,
-          AVG((extraction_metrics->>'entity_count')::float) AS avg_entity_count,
-          AVG((extraction_metrics->>'fact_count')::float) AS avg_fact_count
+          AVG((extraction_metrics->>'extracted')::float) AS avg_entity_count,
+          AVG((extraction_metrics->>'facts_extracted')::float) AS avg_fact_count
         FROM loom_episodes
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND processed = true
         GROUP BY extraction_model
         ORDER BY episode_count DESC
         "#,
@@ -1492,20 +1492,29 @@ pub async fn handle_metrics_extraction(
     .fetch_all(pool)
     .await?;
 
-    // Resolution method distribution from loom_resolution_conflicts candidates JSONB
-    // We approximate from the resolution field patterns
+    // Resolution method distribution from extraction_metrics JSONB
+    // Each processed episode stores resolved_exact, resolved_alias,
+    // resolved_semantic, and new counts in extraction_metrics.
     let resolution_rows: Vec<CountByKeyRow> = sqlx::query_as(
         r#"
-        SELECT
-          CASE
-            WHEN resolution LIKE 'merged:%' THEN 'merged'
-            WHEN resolution = 'kept_separate' THEN 'kept_separate'
-            WHEN resolution LIKE 'split:%' THEN 'split'
-            ELSE 'unresolved'
-          END AS key,
-          COUNT(*) AS count
-        FROM loom_resolution_conflicts
-        GROUP BY 1
+        SELECT key, SUM(cnt)::bigint AS count FROM (
+          SELECT 'exact' AS key,
+                 COALESCE((extraction_metrics->>'resolved_exact')::bigint, 0) AS cnt
+          FROM loom_episodes WHERE processed = true AND deleted_at IS NULL
+          UNION ALL
+          SELECT 'alias' AS key,
+                 COALESCE((extraction_metrics->>'resolved_alias')::bigint, 0) AS cnt
+          FROM loom_episodes WHERE processed = true AND deleted_at IS NULL
+          UNION ALL
+          SELECT 'semantic' AS key,
+                 COALESCE((extraction_metrics->>'resolved_semantic')::bigint, 0) AS cnt
+          FROM loom_episodes WHERE processed = true AND deleted_at IS NULL
+          UNION ALL
+          SELECT 'new' AS key,
+                 COALESCE((extraction_metrics->>'new')::bigint, 0) AS cnt
+          FROM loom_episodes WHERE processed = true AND deleted_at IS NULL
+        ) sub
+        GROUP BY key
         ORDER BY count DESC
         "#,
     )
@@ -1515,7 +1524,7 @@ pub async fn handle_metrics_extraction(
     // Custom predicate candidate growth over last 30 days
     let growth_rows: Vec<DailyMetricRow> = sqlx::query_as(
         r#"
-        SELECT DATE(created_at)::text AS date,
+        SELECT DATE(created_at) AS date,
                COUNT(*)::float AS value
         FROM loom_predicate_candidates
         WHERE created_at > NOW() - INTERVAL '30 days'
@@ -1632,17 +1641,35 @@ pub async fn handle_metrics_hot_tier(
 
     let rows: Vec<HotTierRow> = sqlx::query_as(
         r#"
+        WITH hot_entities AS (
+          SELECT e.namespace, COUNT(*) AS cnt
+          FROM loom_entities e
+          JOIN loom_entity_state es ON es.entity_id = e.id
+          WHERE e.deleted_at IS NULL AND es.tier = 'hot'
+          GROUP BY e.namespace
+        ),
+        hot_facts AS (
+          SELECT f.namespace, COUNT(*) AS cnt
+          FROM loom_facts f
+          JOIN loom_fact_state fs ON fs.fact_id = f.id
+          WHERE f.deleted_at IS NULL AND f.valid_until IS NULL AND fs.tier = 'hot'
+          GROUP BY f.namespace
+        ),
+        namespaces AS (
+          SELECT DISTINCT namespace FROM loom_entities WHERE deleted_at IS NULL
+          UNION
+          SELECT DISTINCT namespace FROM loom_facts WHERE deleted_at IS NULL
+        )
         SELECT
-          e.namespace,
-          COUNT(CASE WHEN es.tier = 'hot' THEN 1 END) AS hot_entity_count,
-          0::bigint AS hot_fact_count,
+          n.namespace,
+          COALESCE(he.cnt, 0) AS hot_entity_count,
+          COALESCE(hf.cnt, 0) AS hot_fact_count,
           COALESCE(nc.hot_tier_budget, 500) AS budget_tokens
-        FROM loom_entities e
-        LEFT JOIN loom_entity_state es ON es.entity_id = e.id
-        LEFT JOIN loom_namespace_config nc ON nc.namespace = e.namespace
-        WHERE e.deleted_at IS NULL
-        GROUP BY e.namespace, nc.hot_tier_budget
-        ORDER BY e.namespace
+        FROM namespaces n
+        LEFT JOIN hot_entities he ON he.namespace = n.namespace
+        LEFT JOIN hot_facts hf ON hf.namespace = n.namespace
+        LEFT JOIN loom_namespace_config nc ON nc.namespace = n.namespace
+        ORDER BY n.namespace
         "#,
     )
     .fetch_all(pool)
@@ -1995,6 +2022,50 @@ pub async fn handle_resolve_predicate_candidate(
 
 // ---------------------------------------------------------------------------
 // Tests
+// ---------------------------------------------------------------------------
+// Benchmark endpoints
+// ---------------------------------------------------------------------------
+
+/// List all benchmark runs ordered by most recent first.
+pub async fn handle_benchmark_runs(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<crate::types::benchmark::BenchmarkRunSummary>>, DashboardError> {
+    let pool = &state.pools.online;
+    let runs = crate::pipeline::benchmark::list_benchmark_runs(pool)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+    Ok(Json(runs))
+}
+
+/// Get full benchmark comparison detail for a specific run.
+pub async fn handle_benchmark_detail(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<crate::types::benchmark::BenchmarkComparison>, DashboardError> {
+    let pool = &state.pools.online;
+    let comparison = crate::pipeline::benchmark::get_benchmark_detail(pool, id)
+        .await
+        .map_err(|e| match e {
+            crate::pipeline::benchmark::BenchmarkError::NotFound(_) => DashboardError::NotFound,
+            crate::pipeline::benchmark::BenchmarkError::Database(e) => {
+                DashboardError::Database(e.to_string())
+            }
+        })?;
+    Ok(Json(comparison))
+}
+
+/// Trigger a new benchmark run. Executes all 10+ tasks across A/B/C conditions.
+pub async fn handle_run_benchmark(
+    State(state): State<AppState>,
+) -> Result<Json<crate::types::benchmark::BenchmarkRunSummary>, DashboardError> {
+    let pool = &state.pools.offline;
+    let run = crate::pipeline::benchmark::execute_benchmark(pool)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+    tracing::info!(run_id = %run.id, name = %run.name, "benchmark run completed");
+    Ok(Json(run))
+}
+
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

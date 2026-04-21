@@ -20,6 +20,18 @@ pub struct AppConfig {
     pub online_pool_max: u32,
     /// Maximum connections for the offline pool (default: 5).
     pub offline_pool_max: u32,
+    /// Minimum connections for the online pool (default: 2).
+    pub online_pool_min: u32,
+    /// Minimum connections for the offline pool (default: 1).
+    pub offline_pool_min: u32,
+    /// Connection acquire timeout in seconds (default: 5).
+    pub pool_acquire_timeout_secs: u64,
+    /// Idle connection timeout in seconds (default: 300 = 5 minutes).
+    pub pool_idle_timeout_secs: u64,
+    /// SQL statement timeout in seconds (default: 30).
+    pub statement_timeout_secs: u64,
+    /// Hot tier cache TTL in seconds (default: 60).
+    pub hot_tier_cache_ttl_secs: u64,
     /// Bind address for the HTTP server.
     pub loom_host: String,
     /// Port for the HTTP server.
@@ -76,6 +88,36 @@ impl AppConfig {
             .parse::<u32>()
             .map_err(|e| format!("OFFLINE_POOL_MAX must be a valid u32: {e}"))?;
 
+        let online_pool_min = env::var("ONLINE_POOL_MIN")
+            .unwrap_or_else(|_| "2".to_string())
+            .parse::<u32>()
+            .map_err(|e| format!("ONLINE_POOL_MIN must be a valid u32: {e}"))?;
+
+        let offline_pool_min = env::var("OFFLINE_POOL_MIN")
+            .unwrap_or_else(|_| "1".to_string())
+            .parse::<u32>()
+            .map_err(|e| format!("OFFLINE_POOL_MIN must be a valid u32: {e}"))?;
+
+        let pool_acquire_timeout_secs = env::var("POOL_ACQUIRE_TIMEOUT_SECS")
+            .unwrap_or_else(|_| "5".to_string())
+            .parse::<u64>()
+            .map_err(|e| format!("POOL_ACQUIRE_TIMEOUT_SECS must be a valid u64: {e}"))?;
+
+        let pool_idle_timeout_secs = env::var("POOL_IDLE_TIMEOUT_SECS")
+            .unwrap_or_else(|_| "300".to_string())
+            .parse::<u64>()
+            .map_err(|e| format!("POOL_IDLE_TIMEOUT_SECS must be a valid u64: {e}"))?;
+
+        let statement_timeout_secs = env::var("STATEMENT_TIMEOUT_SECS")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse::<u64>()
+            .map_err(|e| format!("STATEMENT_TIMEOUT_SECS must be a valid u64: {e}"))?;
+
+        let hot_tier_cache_ttl_secs = env::var("HOT_TIER_CACHE_TTL_SECS")
+            .unwrap_or_else(|_| "60".to_string())
+            .parse::<u64>()
+            .map_err(|e| format!("HOT_TIER_CACHE_TTL_SECS must be a valid u64: {e}"))?;
+
         let loom_host = env::var("LOOM_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let loom_port = env::var("LOOM_PORT")
             .unwrap_or_else(|_| "8080".to_string())
@@ -107,6 +149,12 @@ impl AppConfig {
             database_url_offline,
             online_pool_max,
             offline_pool_max,
+            online_pool_min,
+            offline_pool_min,
+            pool_acquire_timeout_secs,
+            pool_idle_timeout_secs,
+            statement_timeout_secs,
+            hot_tier_cache_ttl_secs,
             loom_host,
             loom_port,
             loom_bearer_token,

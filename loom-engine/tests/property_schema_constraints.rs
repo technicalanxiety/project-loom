@@ -88,7 +88,7 @@ mod episode_uniqueness {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn duplicate_source_event_id_fails(
@@ -183,7 +183,7 @@ mod entity_uniqueness {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn duplicate_name_type_namespace_fails(

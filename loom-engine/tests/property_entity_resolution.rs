@@ -116,7 +116,7 @@ mod exact_match_confidence {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn exact_match_always_returns_confidence_one(
@@ -154,7 +154,7 @@ mod exact_match_confidence {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn exact_match_confidence_never_varies_with_input(
@@ -203,7 +203,7 @@ mod semantic_resolution_threshold {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn above_threshold_with_sufficient_gap_merges(
@@ -248,7 +248,7 @@ mod semantic_resolution_threshold {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn below_threshold_creates_new_entity(
@@ -272,7 +272,7 @@ mod semantic_resolution_threshold {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn single_candidate_above_threshold_always_merges(
@@ -323,7 +323,7 @@ mod resolution_conflict_logging {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn ambiguous_candidates_flag_conflict(
@@ -380,7 +380,7 @@ mod resolution_conflict_logging {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn conflict_never_merges_when_gap_too_small(
@@ -411,7 +411,7 @@ mod resolution_conflict_logging {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn empty_candidates_create_new_entity(

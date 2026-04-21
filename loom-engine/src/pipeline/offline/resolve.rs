@@ -37,6 +37,37 @@ pub enum ResolveError {
     /// An error generating an embedding for semantic matching.
     #[error("embedding generation failed: {0}")]
     Embedding(#[from] EmbeddingError),
+
+    /// An entity type constraint violation (invalid entity type from LLM).
+    #[error("entity type constraint violation: {0}")]
+    TypeConstraint(String),
+}
+
+/// Validate that an entity type string is one of the 10 allowed types.
+///
+/// Returns `Err(ResolveError::TypeConstraint)` if the type is invalid,
+/// allowing the caller to skip the entity and log the error.
+pub fn validate_entity_type(entity_type: &str) -> Result<(), ResolveError> {
+    let valid_types = [
+        "person",
+        "organization",
+        "project",
+        "service",
+        "technology",
+        "pattern",
+        "environment",
+        "document",
+        "metric",
+        "decision",
+    ];
+    if valid_types.contains(&entity_type.to_lowercase().as_str()) {
+        Ok(())
+    } else {
+        Err(ResolveError::TypeConstraint(format!(
+            "invalid entity type '{entity_type}'; must be one of: {}",
+            valid_types.join(", ")
+        )))
+    }
 }
 
 /// Outcome of Pass 3 semantic matching.
@@ -506,6 +537,7 @@ pub async fn resolve_entity(
             entity_id = %result.entity_id,
             method = %result.method,
             confidence = result.confidence,
+            resolution_method = "exact",
             "entity resolved via exact match"
         );
         update_serving_state_and_link(
@@ -523,6 +555,7 @@ pub async fn resolve_entity(
             entity_id = %result.entity_id,
             method = %result.method,
             confidence = result.confidence,
+            resolution_method = "alias",
             "entity resolved via alias match"
         );
         update_serving_state_and_link(
@@ -533,9 +566,37 @@ pub async fn resolve_entity(
     }
 
     // -- Pass 3: Semantic match ---------------------------------------------
-    let semantic =
+    let semantic = match
         pass3_semantic_match(pool, client, config, name, episode_content, entity_type, namespace)
-            .await?;
+            .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            // Semantic similarity API failure: fall back to creating a new
+            // entity. Prefer fragmentation over collision (recoverable vs.
+            // corrupting). Log the error and mark for manual review.
+            tracing::warn!(
+                entity_name = %name,
+                entity_type = %entity_type,
+                namespace = %namespace,
+                error = %e,
+                "semantic similarity failed, falling back to new entity (prefer fragmentation)"
+            );
+
+            // Log a conflict record so the dashboard surfaces this for review.
+            if let Err(conflict_err) = log_resolution_conflict(
+                pool, name, entity_type, namespace, &[],
+            ).await {
+                tracing::error!(
+                    entity_name = %name,
+                    error = %conflict_err,
+                    "failed to log resolution conflict for manual review"
+                );
+            }
+
+            SemanticResult::NewEntity
+        }
+    };
 
     let result = match semantic {
         SemanticResult::Merge(result) => {
@@ -543,6 +604,7 @@ pub async fn resolve_entity(
                 entity_id = %result.entity_id,
                 method = %result.method,
                 confidence = result.confidence,
+                resolution_method = "semantic",
                 "entity resolved via semantic match"
             );
             result
@@ -558,6 +620,7 @@ pub async fn resolve_entity(
                 method = "new",
                 confidence = 1.0,
                 conflict = true,
+                resolution_method = "new",
                 "new entity created due to semantic conflict"
             );
 
@@ -575,6 +638,7 @@ pub async fn resolve_entity(
                 entity_id = %entity.id,
                 method = "new",
                 confidence = 1.0,
+                resolution_method = "new",
                 "new entity created (no match found)"
             );
 
@@ -717,6 +781,37 @@ mod tests {
             msg.contains("embedding generation failed"),
             "got: {msg}"
         );
+    }
+
+    #[test]
+    fn resolve_error_type_constraint_displays_message() {
+        let err = ResolveError::TypeConstraint("invalid entity type 'foo'".into());
+        let msg = err.to_string();
+        assert!(msg.contains("entity type constraint violation"), "got: {msg}");
+    }
+
+    #[test]
+    fn validate_entity_type_accepts_all_valid_types() {
+        let valid = [
+            "person", "organization", "project", "service", "technology",
+            "pattern", "environment", "document", "metric", "decision",
+        ];
+        for t in &valid {
+            assert!(validate_entity_type(t).is_ok(), "should accept '{t}'");
+        }
+    }
+
+    #[test]
+    fn validate_entity_type_case_insensitive() {
+        assert!(validate_entity_type("Person").is_ok());
+        assert!(validate_entity_type("TECHNOLOGY").is_ok());
+    }
+
+    #[test]
+    fn validate_entity_type_rejects_invalid() {
+        let err = validate_entity_type("invalid_type").unwrap_err();
+        assert!(matches!(err, ResolveError::TypeConstraint(_)));
+        assert!(err.to_string().contains("invalid_type"));
     }
 
     #[test]

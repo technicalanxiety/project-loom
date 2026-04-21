@@ -13,7 +13,7 @@ mod worker;
 use api::auth::require_bearer_token;
 use api::dashboard;
 use api::mcp::{handle_loom_learn, handle_loom_recall, handle_loom_think, AppState};
-use api::rest::{handle_api_learn, handle_health};
+use api::rest::{handle_api_learn, handle_github_webhook, handle_health};
 
 #[tokio::main]
 async fn main() {
@@ -93,6 +93,15 @@ async fn main() {
         ))
         .with_state(state.clone());
 
+    // GitHub webhook — protected by bearer token middleware.
+    let webhook_routes = Router::new()
+        .route("/api/webhooks/github", post(handle_github_webhook))
+        .layer(middleware::from_fn_with_state(
+            bearer_token.clone(),
+            require_bearer_token,
+        ))
+        .with_state(state.clone());
+
     // Unauthenticated routes — health check and legacy stub.
     let public_routes = Router::new()
         .route("/api/health", get(handle_health))
@@ -119,6 +128,9 @@ async fn main() {
         .route("/dashboard/api/metrics/hot-tier", get(dashboard::handle_metrics_hot_tier))
         .route("/dashboard/api/conflicts/:id/resolve", post(dashboard::handle_resolve_conflict))
         .route("/dashboard/api/predicates/candidates/:id/resolve", post(dashboard::handle_resolve_predicate_candidate))
+        .route("/dashboard/api/benchmarks", get(dashboard::handle_benchmark_runs))
+        .route("/dashboard/api/benchmarks/run", post(dashboard::handle_run_benchmark))
+        .route("/dashboard/api/benchmarks/:id", get(dashboard::handle_benchmark_detail))
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
             require_bearer_token,
@@ -128,6 +140,7 @@ async fn main() {
     let app = Router::new()
         .merge(mcp_routes)
         .merge(rest_learn_route)
+        .merge(webhook_routes)
         .merge(public_routes)
         .merge(dashboard_routes);
 

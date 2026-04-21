@@ -246,6 +246,7 @@ pub fn compute_final_score(scores: &RankingScore) -> f64 {
 /// candidate, combines them into a composite score, and sorts descending.
 ///
 /// Returns a list of [`RankedCandidate`] sorted by `final_score` descending.
+#[tracing::instrument(skip(weighted), fields(stage = "rank", candidate_count = weighted.len()))]
 pub fn rank_candidates(weighted: Vec<WeightedCandidate>) -> Vec<RankedCandidate> {
     let mut ranked: Vec<RankedCandidate> = weighted
         .into_iter()

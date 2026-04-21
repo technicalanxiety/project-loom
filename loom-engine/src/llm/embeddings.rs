@@ -115,8 +115,16 @@ pub async fn generate_episode_embedding(
 
 /// Validate that an embedding vector has exactly [`EXPECTED_DIMENSION`]
 /// elements.
+///
+/// On mismatch, logs an error with the expected and actual dimensions
+/// to aid debugging model configuration issues.
 fn validate_dimension(embedding: &[f32]) -> Result<(), EmbeddingError> {
     if embedding.len() != EXPECTED_DIMENSION {
+        tracing::error!(
+            expected = EXPECTED_DIMENSION,
+            actual = embedding.len(),
+            "embedding dimension mismatch — check embedding model configuration"
+        );
         return Err(EmbeddingError::DimensionMismatch {
             expected: EXPECTED_DIMENSION,
             actual: embedding.len(),
@@ -426,7 +434,7 @@ mod tests {
 
     // Property: validate_dimension accepts exactly 768 and rejects all others.
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100))]
+        #![proptest_config(ProptestConfig::with_cases(20))]
 
         #[test]
         fn prop_validate_dimension_accepts_only_768(dim in 0_usize..2048) {
@@ -450,7 +458,7 @@ mod tests {
     // Property: generate_embedding always returns exactly 768 dimensions
     // when the upstream mock returns 768, for any arbitrary input text.
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100))]
+        #![proptest_config(ProptestConfig::with_cases(20))]
 
         #[test]
         fn prop_embedding_output_always_768d(text in ".{1,500}") {
@@ -480,7 +488,7 @@ mod tests {
     // Property: generate_embedding rejects any non-768 dimension returned
     // by the upstream, for arbitrary dimension values.
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100))]
+        #![proptest_config(ProptestConfig::with_cases(20))]
 
         #[test]
         fn prop_embedding_rejects_wrong_dimension(

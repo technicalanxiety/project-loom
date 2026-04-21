@@ -248,13 +248,39 @@ pub async fn run_full_extraction_pipeline(
 
     state::initialize_fact_serving_state(pool, &fact_result.inserted_fact_ids).await?;
 
-    // -- Step 9: Optionally flag candidate procedures -----------------------
-    // Procedure flagging is a future enhancement (procedures.rs is a TODO).
-    // For now, we log that the step was skipped.
-    tracing::debug!(
-        episode_id = %episode_id,
-        "step 9: procedure flagging skipped (not yet implemented)"
-    );
+    // -- Step 9: Flag candidate procedures ----------------------------------
+    tracing::debug!(episode_id = %episode_id, "step 9: flagging candidate procedures");
+
+    let procedure_result = crate::pipeline::offline::procedures::flag_candidate_procedures(
+        pool,
+        client,
+        config,
+        &fact_result.valid_extracted_facts,
+        namespace,
+        episode_id,
+    )
+    .await;
+
+    match &procedure_result {
+        Ok(pr) => {
+            tracing::info!(
+                episode_id = %episode_id,
+                new_procedures = pr.new_count,
+                updated_procedures = pr.updated_count,
+                promoted_procedures = pr.promoted_count,
+                "procedure flagging complete"
+            );
+        }
+        Err(e) => {
+            // Procedure flagging is optional — log the error but don't fail
+            // the pipeline.
+            tracing::warn!(
+                episode_id = %episode_id,
+                error = %e,
+                "procedure flagging failed (non-fatal)"
+            );
+        }
+    }
 
     // -- Step 10: Compute and store extraction metrics ----------------------
     tracing::debug!(episode_id = %episode_id, "step 10: computing extraction metrics");
@@ -424,21 +450,38 @@ impl From<pred_db::PredicateError> for FactExtractionPipelineError {
 /// 3. Query `loom_predicates` for all predicates in the active packs.
 /// 4. Format predicates into a grouped block organized by pack name.
 ///
+/// # Error Handling
+///
+/// If the namespace config or predicate query fails, falls back to core
+/// pack only and logs a warning. This ensures fact extraction can proceed
+/// even when the pack system has issues.
+///
 /// # Errors
 ///
-/// Returns [`FactExtractionPipelineError::Database`] if any database query
-/// fails.
+/// Returns [`FactExtractionPipelineError::Database`] only if the core pack
+/// fallback also fails.
 pub async fn assemble_fact_prompt(
     pool: &PgPool,
     namespace: &str,
 ) -> Result<String, FactExtractionPipelineError> {
     // Step 1: Load namespace predicate packs from loom_namespace_config.
-    let packs_row: Option<NamespacePacksRow> = sqlx::query_as(
+    let packs_row: Option<NamespacePacksRow> = match sqlx::query_as(
         "SELECT predicate_packs FROM loom_namespace_config WHERE namespace = $1",
     )
     .bind(namespace)
     .fetch_optional(pool)
-    .await?;
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::warn!(
+                namespace,
+                error = %e,
+                "failed to load namespace config, falling back to core pack only"
+            );
+            None
+        }
+    };
 
     let mut packs: Vec<String> = packs_row
         .and_then(|r| r.predicate_packs)
@@ -456,7 +499,20 @@ pub async fn assemble_fact_prompt(
     );
 
     // Step 3: Query all predicates in the active packs.
-    let predicates = pred_db::query_predicates_by_pack(pool, &packs).await?;
+    // Fall back to core-only if the full pack query fails.
+    let predicates = match pred_db::query_predicates_by_pack(pool, &packs).await {
+        Ok(preds) => preds,
+        Err(e) => {
+            tracing::warn!(
+                namespace,
+                error = %e,
+                packs = ?packs,
+                "failed to load predicates for configured packs, falling back to core pack only"
+            );
+            // Try core-only as fallback.
+            pred_db::query_predicates_by_pack(pool, &["core".to_string()]).await?
+        }
+    };
 
     tracing::info!(
         predicate_count = predicates.len(),
@@ -537,6 +593,9 @@ pub struct FactOrchestrationResult {
     pub superseded_count: usize,
     /// The model identifier used for extraction.
     pub model: String,
+    /// The validated extracted facts (with valid entity references).
+    /// Used downstream by procedure flagging for pattern detection.
+    pub valid_extracted_facts: Vec<ExtractedFact>,
 }
 
 /// Orchestrate the full fact extraction flow for a single episode.
@@ -607,6 +666,22 @@ pub async fn orchestrate_fact_extraction(
 
         match (subject_id, object_id) {
             (Some(&subj_id), Some(&obj_id)) => {
+                // Validate cross-namespace isolation: subject, object, and
+                // fact must all be in the same namespace (Requirement 7.4).
+                if let Err(e) = crate::pipeline::online::namespace::validate_fact_namespace(
+                    pool, subj_id, obj_id, namespace,
+                ).await {
+                    tracing::warn!(
+                        subject_id = %subj_id,
+                        object_id = %obj_id,
+                        namespace = %namespace,
+                        error = %e,
+                        "skipping fact due to cross-namespace reference"
+                    );
+                    skipped_count += 1;
+                    continue;
+                }
+
                 // Step 3: Insert the fact with provenance.
                 let new_fact = NewFact {
                     subject_id: subj_id,
@@ -706,6 +781,7 @@ pub async fn orchestrate_fact_extraction(
         predicate_validation,
         superseded_count,
         model,
+        valid_extracted_facts: valid_facts,
     })
 }
 
@@ -746,17 +822,45 @@ pub async fn validate_and_track_predicates(
     let mut custom_count: usize = 0;
 
     for (fact, &fact_id) in facts.iter_mut().zip(fact_ids.iter()) {
-        let canonical = pred_db::find_canonical_predicate(pool, &fact.predicate).await?;
+        let canonical = match pred_db::find_canonical_predicate(pool, &fact.predicate).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    predicate = %fact.predicate,
+                    fact_id = %fact_id,
+                    episode_id = %episode_id,
+                    error = %e,
+                    "predicate validation failed, skipping predicate tracking for this fact"
+                );
+                // Continue processing other facts on individual failures.
+                continue;
+            }
+        };
 
         if canonical.is_some() {
             // Canonical predicate: mark and increment usage.
             fact.custom = false;
-            pred_db::increment_usage_count(pool, &fact.predicate).await?;
+            if let Err(e) = pred_db::increment_usage_count(pool, &fact.predicate).await {
+                tracing::warn!(
+                    predicate = %fact.predicate,
+                    error = %e,
+                    "failed to increment usage count for canonical predicate"
+                );
+            }
             canonical_count += 1;
         } else {
             // Custom predicate: mark and track as candidate.
             fact.custom = true;
-            pred_db::insert_or_update_candidate(pool, &fact.predicate, fact_id).await?;
+            if let Err(e) = pred_db::insert_or_update_candidate(pool, &fact.predicate, fact_id).await {
+                tracing::warn!(
+                    predicate = %fact.predicate,
+                    fact_id = %fact_id,
+                    error = %e,
+                    "failed to track custom predicate candidate"
+                );
+                custom_count += 1;
+                continue;
+            }
             custom_count += 1;
 
             // Check if the candidate has reached the review threshold.
@@ -1407,6 +1511,7 @@ mod tests {
             predicate_validation: None,
             superseded_count: 0,
             model: "test-model".to_string(),
+            valid_extracted_facts: vec![],
         };
         assert_eq!(result.inserted_count, 0);
         assert_eq!(result.skipped_count, 0);
@@ -1429,6 +1534,7 @@ mod tests {
             }),
             superseded_count: 1,
             model: "gemma4:26b".to_string(),
+            valid_extracted_facts: vec![],
         };
         assert_eq!(result.inserted_count, 2);
         assert_eq!(result.skipped_count, 1);
@@ -1449,6 +1555,7 @@ mod tests {
             predicate_validation: None,
             superseded_count: 0,
             model: "test".to_string(),
+            valid_extracted_facts: vec![],
         };
         let debug = format!("{result:?}");
         assert!(debug.contains("inserted_count: 3"));
@@ -1467,6 +1574,7 @@ mod tests {
             }),
             superseded_count: 0,
             model: "test".to_string(),
+            valid_extracted_facts: vec![],
         };
         let cloned = result.clone();
         assert_eq!(cloned.inserted_count, result.inserted_count);

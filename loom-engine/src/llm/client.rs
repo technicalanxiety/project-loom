@@ -55,11 +55,18 @@ pub enum LlmError {
 /// Maximum number of retry attempts per provider (Ollama or Azure).
 const MAX_RETRIES: u32 = 3;
 
+/// Maximum number of retry attempts for Azure OpenAI rate limits.
+/// Uses escalating backoff: 1s, 2s, 4s, 8s, 16s.
+const AZURE_RATE_LIMIT_MAX_RETRIES: u32 = 5;
+
 /// Per-request timeout.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Base delay for exponential backoff (doubles each retry).
 const BACKOFF_BASE: Duration = Duration::from_millis(500);
+
+/// Base delay for Azure rate limit backoff (1 second, doubles each retry).
+const AZURE_RATE_LIMIT_BACKOFF_BASE: Duration = Duration::from_secs(1);
 
 /// Unified LLM client wrapping reqwest with Ollama primary and Azure OpenAI
 /// fallback.
@@ -170,6 +177,9 @@ impl LlmClient {
     // -- Azure fallback -----------------------------------------------------
 
     /// Chat completion via Azure OpenAI (fallback path).
+    ///
+    /// Uses extended retry logic for rate limits (429): up to 5 retries
+    /// with exponential backoff (1s, 2s, 4s, 8s, 16s).
     async fn call_llm_azure(
         &self,
         system_prompt: &str,
@@ -188,12 +198,14 @@ impl LlmClient {
 
         let endpoint = format!("{url}/v1/chat/completions");
         let resp = self
-            .post_with_retry(&endpoint, &body, Some(key))
+            .post_with_retry_azure(&endpoint, &body, key)
             .await?;
         parse_chat_response(&resp)
     }
 
     /// Embedding generation via Azure OpenAI (fallback path).
+    ///
+    /// Uses extended retry logic for rate limits (429).
     async fn call_embeddings_azure(
         &self,
         input: &str,
@@ -207,7 +219,7 @@ impl LlmClient {
 
         let endpoint = format!("{url}/v1/embeddings");
         let resp = self
-            .post_with_retry(&endpoint, &body, Some(key))
+            .post_with_retry_azure(&endpoint, &body, key)
             .await?;
         parse_embedding_response(&resp)
     }
@@ -292,6 +304,87 @@ impl LlmClient {
                 }
                 Err(e) => {
                     tracing::warn!(url, attempt, error = %e, "HTTP request error");
+                    last_err = Some(LlmError::Http(e));
+                }
+            }
+        }
+
+        Err(LlmError::RetriesExhausted(
+            last_err
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+        ))
+    }
+
+    /// POST with Azure-specific retry logic for rate limits.
+    ///
+    /// Uses extended backoff for 429 responses: 1s, 2s, 4s, 8s, 16s
+    /// (up to [`AZURE_RATE_LIMIT_MAX_RETRIES`] attempts).
+    async fn post_with_retry_azure(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+        api_key: &str,
+    ) -> Result<serde_json::Value, LlmError> {
+        let mut last_err: Option<LlmError> = None;
+
+        for attempt in 0..AZURE_RATE_LIMIT_MAX_RETRIES {
+            if attempt > 0 {
+                // Use escalating backoff: 1s, 2s, 4s, 8s, 16s.
+                let delay = AZURE_RATE_LIMIT_BACKOFF_BASE * 2u32.pow(attempt - 1);
+                tracing::info!(
+                    attempt,
+                    delay_ms = delay.as_millis() as u64,
+                    url,
+                    "retrying Azure OpenAI request (rate limit backoff)"
+                );
+                tokio::time::sleep(delay).await;
+            }
+
+            let req = self
+                .http
+                .post(url)
+                .header("Content-Type", "application/json")
+                .header("api-key", api_key);
+
+            match req.json(body).send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        let json: serde_json::Value = resp
+                            .json()
+                            .await
+                            .map_err(|e| LlmError::Parse(e.to_string()))?;
+                        tracing::info!(url, status = %status, "Azure OpenAI request succeeded");
+                        return Ok(json);
+                    }
+
+                    let body_text = resp.text().await.unwrap_or_default();
+                    let body_preview = truncate(&body_text, 512);
+
+                    // Retry on 429 (rate limit) and 5xx (server errors).
+                    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                        tracing::warn!(
+                            url,
+                            status = status.as_u16(),
+                            attempt,
+                            body = %body_preview,
+                            "Azure OpenAI retryable error"
+                        );
+                        last_err = Some(LlmError::ApiError {
+                            status: status.as_u16(),
+                            body: body_preview,
+                        });
+                        continue;
+                    }
+
+                    return Err(LlmError::ApiError {
+                        status: status.as_u16(),
+                        body: body_preview,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(url, attempt, error = %e, "Azure OpenAI HTTP request error");
                     last_err = Some(LlmError::Http(e));
                 }
             }

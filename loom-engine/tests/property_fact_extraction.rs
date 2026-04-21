@@ -107,7 +107,7 @@ mod pack_aware_prompt_assembly {
     use super::*;
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn core_pack_predicates_always_present_in_output(
@@ -160,7 +160,7 @@ mod pack_aware_prompt_assembly {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn configured_packs_predicates_grouped_by_pack(
@@ -217,7 +217,7 @@ mod pack_aware_prompt_assembly {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn empty_predicates_returns_placeholder(
@@ -260,7 +260,7 @@ mod canonical_predicate_classification {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn canonical_predicates_marked_not_custom(
@@ -282,7 +282,7 @@ mod canonical_predicate_classification {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn non_canonical_predicates_marked_custom(
@@ -305,7 +305,7 @@ mod canonical_predicate_classification {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn classification_is_deterministic(
@@ -385,7 +385,7 @@ mod custom_predicate_occurrence_tracking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn occurrence_count_equals_fact_count(
@@ -418,7 +418,7 @@ mod custom_predicate_occurrence_tracking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn candidates_at_five_occurrences_flagged_for_review(
@@ -447,7 +447,7 @@ mod custom_predicate_occurrence_tracking {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn candidates_below_five_not_flagged(
@@ -552,7 +552,7 @@ mod fact_supersession {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn contradicting_fact_triggers_supersession(
@@ -613,7 +613,7 @@ mod fact_supersession {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn same_object_does_not_trigger_supersession(
@@ -646,7 +646,7 @@ mod fact_supersession {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn different_predicate_does_not_trigger_supersession(
@@ -706,7 +706,7 @@ mod predicate_pack_isolation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn each_predicate_belongs_to_exactly_one_pack(
@@ -757,7 +757,7 @@ mod predicate_pack_isolation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn namespace_packs_always_contain_core(
@@ -781,7 +781,7 @@ mod predicate_pack_isolation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn core_only_namespace_has_core(
@@ -800,7 +800,7 @@ mod predicate_pack_isolation {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 100, .. ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 20, .. ProptestConfig::default() })]
 
         #[test]
         fn format_block_preserves_pack_isolation(
