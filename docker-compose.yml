@@ -19,12 +19,29 @@ services:
     networks:
       - loom-net
 
-  # ─── Ollama (Local LLM Inference) ─────────────────────────
-  # After first start, pull the required models:
-  #   docker compose exec ollama ollama pull gemma4:26b
+  # ─── Ollama (Local LLM Inference) — opt-in ────────────────
+  # This service is gated behind the `with-docker-ollama` profile. On
+  # Apple Silicon Macs the right setup is native Ollama (brew install
+  # ollama) because Docker cannot pass through Metal / MPS — a Dockered
+  # Ollama runs CPU-only, needs 3-5x more memory, and is dramatically
+  # slower than a native install talking to the same container stack
+  # via host.docker.internal:11434.
+  #
+  # Native path (default):
+  #   brew install ollama && ollama serve
+  #   ollama pull gemma4:e4b
+  #   ollama pull nomic-embed-text
+  #   ollama pull gemma4:26b              # optional; tight fit under 16GB
+  #   # .env should set OLLAMA_URL=http://host.docker.internal:11434
+  #
+  # Docker path (Linux / CUDA hosts):
+  #   docker compose --profile with-docker-ollama up -d
   #   docker compose exec ollama ollama pull gemma4:e4b
   #   docker compose exec ollama ollama pull nomic-embed-text
+  #   docker compose exec ollama ollama pull gemma4:26b
+  #   # .env should set OLLAMA_URL=http://ollama:11434
   ollama:
+    profiles: ["with-docker-ollama"]
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
@@ -45,21 +62,24 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     environment:
-      # Explicit Docker-internal hostnames override any .env values
+      # Explicit Docker-internal hostnames override any .env values.
+      # OLLAMA_URL is NOT overridden here so .env can pick between the
+      # native (host.docker.internal) and dockered (ollama) paths.
       DATABASE_URL: "postgres://loom:loom@postgres:5432/loom"
       DATABASE_URL_ONLINE: "postgres://loom:loom@postgres:5432/loom"
       DATABASE_URL_OFFLINE: "postgres://loom:loom@postgres:5432/loom"
       ONLINE_POOL_MAX: "10"
       OFFLINE_POOL_MAX: "5"
-      OLLAMA_URL: "http://ollama:11434"
       LOOM_HOST: "0.0.0.0"
       LOOM_PORT: "8080"
     ports:
       - "8080:8080"
+    # depends_on does NOT include ollama: when Ollama runs natively on
+    # the host, the engine has no local container to wait for. The LLM
+    # client has retry + Azure-fallback logic, and /api/health reports
+    # Ollama status as degraded rather than failing startup.
     depends_on:
       postgres:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/api/health"]

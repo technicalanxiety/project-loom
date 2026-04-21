@@ -11,6 +11,12 @@ asks it to, following the Projects instructions.
 
 ## Live MCP capture
 
+Claude Desktop is **stdio-only** in shipped versions at time of writing —
+the client does not hit HTTP MCP endpoints directly. The established
+bridge is [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), a
+small Node shim that Claude Desktop spawns via stdio and that speaks
+HTTP to Loom.
+
 Copy [templates/claude_desktop_config.example.json](../../templates/claude_desktop_config.example.json)
 into the client's config file:
 
@@ -22,23 +28,43 @@ into the client's config file:
 {
   "mcpServers": {
     "loom": {
-      "transport": {
-        "type": "http",
-        "url": "https://loom.yourdomain.com/mcp",
-        "headers": {
-          "Authorization": "Bearer ${LOOM_TOKEN}"
-        }
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://loom.yourdomain.com/mcp",
+        "--header",
+        "Authorization:Bearer REPLACE_WITH_LOOM_BEARER_TOKEN"
+      ],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
       }
     }
   }
 }
 ```
 
-Replace `LOOM_TOKEN` and the URL placeholder. Restart Claude Desktop —
-it rereads the config at launch.
+Replace the bearer token and URL. Restart Claude Desktop — it rereads
+the config at launch and respawns the `mcp-remote` process, which then
+connects to Loom via the JSON-RPC 2.0 MCP dispatcher at `POST /mcp`.
 
 The server hardcodes `ingestion_mode = live_mcp_capture` at the MCP
 boundary, same as every other MCP transport.
+
+### Self-signed cert handling
+
+The `NODE_TLS_REJECT_UNAUTHORIZED=0` env var tells Node to tolerate
+Caddy's self-signed localhost cert. Remove that line once you are
+deploying Loom behind a real domain with a Let's Encrypt cert — leaving
+certificate verification disabled in production is the kind of thing
+that shows up in a post-incident review.
+
+### Variable interpolation gotcha
+
+Claude Desktop does **not** perform `${ENV_VAR}` interpolation on values
+in this file. Write the literal bearer token into the `--header` arg;
+do not wrap it in `${…}`. That shell-style syntax gets sent to Loom as
+a literal string and auth fails.
 
 ## Discipline block — Projects instructions
 

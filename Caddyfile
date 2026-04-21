@@ -19,7 +19,14 @@ localhost {
 	# GitHub Copilot, M365 Copilot, etc.) must supply their own
 	# `Authorization: Bearer <token>` header. Caddy does not inject one
 	# here.
-	handle /mcp/* {
+	#
+	# `/mcp` (no trailing slash) is the JSON-RPC 2.0 dispatcher — this is
+	# what MCP clients hit. `/mcp/*` covers the per-tool REST endpoints
+	# (/mcp/loom_learn, /mcp/loom_think, /mcp/loom_recall). Caddy's `/mcp/*`
+	# matcher does NOT match the bare `/mcp` path, so a named matcher
+	# covers both in one route.
+	@mcp path /mcp /mcp/*
+	handle @mcp {
 		reverse_proxy loom-engine:8080
 	}
 

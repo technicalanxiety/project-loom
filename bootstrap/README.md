@@ -58,9 +58,17 @@ Every parser reads `LOOM_URL` and `LOOM_TOKEN` from the environment and
 takes `--namespace` as a required flag. Input flags are parser-specific
 (`--session-dir`, `--export`, `--export-dir`).
 
+For localhost development where Caddy serves a self-signed cert via its
+local CA, set `LOOM_TLS_INSECURE=1` so Python's urllib tolerates the
+cert. Leave it unset in production — the env var is an opt-in-per-run
+bypass, not a default, precisely so a real deployment with a real cert
+does not silently skip verification.
+
 ```bash
 export LOOM_URL="https://loom.yourdomain.com"
 export LOOM_TOKEN="your-bearer-token"
+# Localhost / self-signed dev only:
+# export LOOM_TLS_INSECURE=1
 
 # Claude Code local JSONL sessions
 python3 bootstrap/claude_code_parser.py \

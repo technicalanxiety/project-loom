@@ -30,6 +30,7 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 
+from loom_http import build_ssl_context
 from schema_assertions import SchemaAssertionError, assert_schema
 
 PARSER_VERSION = "chatgpt_parser@0.1.0"
@@ -183,7 +184,7 @@ def post_episode(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=build_ssl_context()) as resp:
             body = resp.read().decode("utf-8")
             print(f"ok {source_event_id} -> {body}")
     except urllib.error.HTTPError as exc:
