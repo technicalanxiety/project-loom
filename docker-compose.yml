@@ -1,5 +1,5 @@
 services:
-  # ─── PostgreSQL 16 with pgvector + pgAudit ─────────────────
+  # ─── PostgreSQL 17 with pgvector ────────────────────────────
   postgres:
     image: pgvector/pgvector:pg17
     environment:
@@ -11,12 +11,6 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
-    command:
-      - "postgres"
-      - "-c"
-      - "shared_preload_libraries=pgaudit"
-      - "-c"
-      - "pgaudit.log=write"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U loom -d loom"]
       interval: 5s
@@ -36,13 +30,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s

@@ -17,6 +17,11 @@ use api::rest::{handle_api_learn, handle_github_webhook, handle_health};
 
 #[tokio::main]
 async fn main() {
+    // Install ring as the default rustls crypto provider (avoids aws-lc-sys
+    // which cannot cross-compile to musl). Idempotent via Once — also called
+    // from LlmClient::new so test harnesses don't need to do it themselves.
+    loom_engine::ensure_crypto_provider();
+
     // Load .env before tracing init so RUST_LOG is available.
     dotenvy::dotenv().ok();
 
