@@ -1,0 +1,25 @@
+# cargo-audit configuration for loom-engine.
+#
+# Run with `cargo audit` from this directory; the tool picks up this file
+# automatically. CI should do the same.
+
+[advisories]
+
+# Advisories ignored below are acknowledged and documented. Each entry must
+# include a one-line justification above it describing why the advisory does
+# not apply to Loom. Re-evaluate on every cargo audit run — if upstream ever
+# ships a fix, drop the entry.
+ignore = [
+  # RUSTSEC-2023-0071 — Marvin Attack timing sidechannel in `rsa` 0.9.
+  #
+  # Pulled in via sqlx-macros-core → sqlx-mysql → rsa. Loom is Postgres-only;
+  # nothing on our target links sqlx-mysql (cargo tree -i sqlx-mysql returns
+  # "nothing to print") and rsa key operations are never performed at
+  # runtime. The crate is only compiled into sqlx-macros-core at macro-
+  # expansion time. Upstream has no fix available as of this writing.
+  #
+  # Revisit if: (a) RustCrypto publishes a fixed rsa version and sqlx picks
+  # it up, or (b) sqlx restructures sqlx-macros-core to stop pulling mysql
+  # unconditionally.
+  "RUSTSEC-2023-0071",
+]

@@ -62,6 +62,19 @@ Loom's authority hierarchy — Episodes > Facts > Procedures — assumes episode
 - Node dependencies are pinned in `package.json`.
 - `cargo audit` and `npm audit` should be run periodically.
 
+#### Acknowledged advisories
+
+The following advisories are known, documented, and ignored via
+[`loom-engine/.cargo/audit.toml`](loom-engine/.cargo/audit.toml). Each
+ignore entry in that file carries the rationale inline; reproducing
+here so consumers of a fork can evaluate without reading the config.
+
+| Advisory | Severity | Crate | Why ignored |
+|----------|----------|-------|-------------|
+| RUSTSEC-2023-0071 | 5.9 medium | `rsa` 0.9 | Pulled in via `sqlx-macros-core → sqlx-mysql`. Loom is Postgres-only — `cargo tree -i sqlx-mysql` returns "nothing to print" on our target. The vulnerable RSA timing sidechannel path is never compiled into the runtime binary, let alone exercised. Upstream has no fix; revisit when either `rsa` ships a patch or `sqlx` restructures `sqlx-macros-core`. |
+
+If a fork needs different risk tolerance, edit `.cargo/audit.toml`.
+
 ### Known Limitations (MVP)
 
 - Bearer token auth is a single shared secret — no per-client isolation.
