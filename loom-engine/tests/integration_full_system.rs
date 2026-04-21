@@ -159,7 +159,7 @@ async fn build_full_test_app() -> Router {
             get(dashboard::handle_compilations),
         )
         .route(
-            "/dashboard/api/compilations/:id",
+            "/dashboard/api/compilations/{id}",
             get(dashboard::handle_compilation_detail),
         )
         .route(
@@ -167,11 +167,11 @@ async fn build_full_test_app() -> Router {
             get(dashboard::handle_entities),
         )
         .route(
-            "/dashboard/api/entities/:id",
+            "/dashboard/api/entities/{id}",
             get(dashboard::handle_entity_detail),
         )
         .route(
-            "/dashboard/api/entities/:id/graph",
+            "/dashboard/api/entities/{id}/graph",
             get(dashboard::handle_entity_graph),
         )
         .route("/dashboard/api/facts", get(dashboard::handle_facts))
@@ -188,11 +188,11 @@ async fn build_full_test_app() -> Router {
             get(dashboard::handle_predicate_packs),
         )
         .route(
-            "/dashboard/api/predicates/packs/:pack",
+            "/dashboard/api/predicates/packs/{pack}",
             get(dashboard::handle_pack_detail),
         )
         .route(
-            "/dashboard/api/predicates/active/:namespace",
+            "/dashboard/api/predicates/active/{namespace}",
             get(dashboard::handle_active_predicates),
         )
         .route(
@@ -212,11 +212,11 @@ async fn build_full_test_app() -> Router {
             get(dashboard::handle_metrics_hot_tier),
         )
         .route(
-            "/dashboard/api/conflicts/:id/resolve",
+            "/dashboard/api/conflicts/{id}/resolve",
             post(dashboard::handle_resolve_conflict),
         )
         .route(
-            "/dashboard/api/predicates/candidates/:id/resolve",
+            "/dashboard/api/predicates/candidates/{id}/resolve",
             post(dashboard::handle_resolve_predicate_candidate),
         )
         .layer(middleware::from_fn_with_state(

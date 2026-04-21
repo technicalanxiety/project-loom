@@ -881,7 +881,7 @@ pub async fn handle_compilations(
 }
 
 // ---------------------------------------------------------------------------
-// GET /dashboard/api/compilations/:id
+// GET /dashboard/api/compilations/{id}
 // ---------------------------------------------------------------------------
 
 /// Full detail of a single compilation trace including score breakdowns.
@@ -988,7 +988,7 @@ pub async fn handle_entities(
 }
 
 // ---------------------------------------------------------------------------
-// GET /dashboard/api/entities/:id
+// GET /dashboard/api/entities/{id}
 // ---------------------------------------------------------------------------
 
 /// Full entity detail including properties, aliases, and related facts.
@@ -1067,7 +1067,7 @@ pub async fn handle_entity_detail(
 }
 
 // ---------------------------------------------------------------------------
-// GET /dashboard/api/entities/:id/graph
+// GET /dashboard/api/entities/{id}/graph
 // ---------------------------------------------------------------------------
 
 /// 1-2 hop neighborhood graph for an entity via loom_traverse.
@@ -1298,7 +1298,7 @@ pub async fn handle_predicate_packs(
 }
 
 // ---------------------------------------------------------------------------
-// GET /dashboard/api/predicates/packs/:pack
+// GET /dashboard/api/predicates/packs/{pack}
 // ---------------------------------------------------------------------------
 
 /// Pack detail with all predicates, categories, and usage counts.
@@ -1350,7 +1350,7 @@ pub async fn handle_pack_detail(
 }
 
 // ---------------------------------------------------------------------------
-// GET /dashboard/api/predicates/active/:namespace
+// GET /dashboard/api/predicates/active/{namespace}
 // ---------------------------------------------------------------------------
 
 /// Active predicates for a namespace based on its configured predicate packs.
@@ -1700,7 +1700,7 @@ pub async fn handle_metrics_hot_tier(
 }
 
 // ---------------------------------------------------------------------------
-// POST /dashboard/api/conflicts/:id/resolve
+// POST /dashboard/api/conflicts/{id}/resolve
 // ---------------------------------------------------------------------------
 
 /// Request body for resolving an entity conflict.
@@ -1797,7 +1797,7 @@ pub async fn handle_resolve_conflict(
 }
 
 // ---------------------------------------------------------------------------
-// POST /dashboard/api/predicates/candidates/:id/resolve
+// POST /dashboard/api/predicates/candidates/{id}/resolve
 // ---------------------------------------------------------------------------
 
 /// Request body for resolving a predicate candidate.

@@ -118,16 +118,16 @@ async fn main() {
         .route("/dashboard/api/health", get(dashboard::handle_dashboard_health))
         .route("/dashboard/api/namespaces", get(dashboard::handle_namespaces))
         .route("/dashboard/api/compilations", get(dashboard::handle_compilations))
-        .route("/dashboard/api/compilations/:id", get(dashboard::handle_compilation_detail))
+        .route("/dashboard/api/compilations/{id}", get(dashboard::handle_compilation_detail))
         .route("/dashboard/api/entities", get(dashboard::handle_entities))
-        .route("/dashboard/api/entities/:id", get(dashboard::handle_entity_detail))
-        .route("/dashboard/api/entities/:id/graph", get(dashboard::handle_entity_graph))
+        .route("/dashboard/api/entities/{id}", get(dashboard::handle_entity_detail))
+        .route("/dashboard/api/entities/{id}/graph", get(dashboard::handle_entity_graph))
         .route("/dashboard/api/facts", get(dashboard::handle_facts))
         .route("/dashboard/api/conflicts", get(dashboard::handle_conflicts))
         .route("/dashboard/api/predicates/candidates", get(dashboard::handle_predicate_candidates))
         .route("/dashboard/api/predicates/packs", get(dashboard::handle_predicate_packs))
-        .route("/dashboard/api/predicates/packs/:pack", get(dashboard::handle_pack_detail))
-        .route("/dashboard/api/predicates/active/:namespace", get(dashboard::handle_active_predicates))
+        .route("/dashboard/api/predicates/packs/{pack}", get(dashboard::handle_pack_detail))
+        .route("/dashboard/api/predicates/active/{namespace}", get(dashboard::handle_active_predicates))
         .route("/dashboard/api/metrics/retrieval", get(dashboard::handle_metrics_retrieval))
         .route("/dashboard/api/metrics/extraction", get(dashboard::handle_metrics_extraction))
         .route("/dashboard/api/metrics/classification", get(dashboard::handle_metrics_classification))
@@ -140,11 +140,11 @@ async fn main() {
             "/dashboard/api/metrics/ingestion-distribution",
             get(dashboard::handle_metrics_ingestion_distribution),
         )
-        .route("/dashboard/api/conflicts/:id/resolve", post(dashboard::handle_resolve_conflict))
-        .route("/dashboard/api/predicates/candidates/:id/resolve", post(dashboard::handle_resolve_predicate_candidate))
+        .route("/dashboard/api/conflicts/{id}/resolve", post(dashboard::handle_resolve_conflict))
+        .route("/dashboard/api/predicates/candidates/{id}/resolve", post(dashboard::handle_resolve_predicate_candidate))
         .route("/dashboard/api/benchmarks", get(dashboard::handle_benchmark_runs))
         .route("/dashboard/api/benchmarks/run", post(dashboard::handle_run_benchmark))
-        .route("/dashboard/api/benchmarks/:id", get(dashboard::handle_benchmark_detail))
+        .route("/dashboard/api/benchmarks/{id}", get(dashboard::handle_benchmark_detail))
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
             require_bearer_token,

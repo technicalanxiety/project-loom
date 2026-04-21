@@ -36,23 +36,23 @@ fn all_dashboard_routes() -> Vec<DashboardRoute> {
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/health", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/namespaces", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/compilations", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/compilations/:id", is_write: false },
+        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/compilations/{id}", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities/:id", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities/:id/graph", is_write: false },
+        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities/{id}", is_write: false },
+        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities/{id}/graph", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/facts", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/conflicts", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/candidates", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/packs", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/packs/:pack", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/active/:namespace", is_write: false },
+        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/packs/{pack}", is_write: false },
+        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/active/{namespace}", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/retrieval", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/extraction", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/classification", is_write: false },
         DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/hot-tier", is_write: false },
         // Write POST endpoints (exactly 2)
-        DashboardRoute { method: HttpMethod::Post, path: "/dashboard/api/conflicts/:id/resolve", is_write: true },
-        DashboardRoute { method: HttpMethod::Post, path: "/dashboard/api/predicates/candidates/:id/resolve", is_write: true },
+        DashboardRoute { method: HttpMethod::Post, path: "/dashboard/api/conflicts/{id}/resolve", is_write: true },
+        DashboardRoute { method: HttpMethod::Post, path: "/dashboard/api/predicates/candidates/{id}/resolve", is_write: true },
     ]
 }
 
@@ -227,11 +227,11 @@ mod unit_tests {
             .collect();
 
         assert!(
-            write_paths.contains(&"/dashboard/api/conflicts/:id/resolve"),
+            write_paths.contains(&"/dashboard/api/conflicts/{id}/resolve"),
             "conflict resolve endpoint must be a write route"
         );
         assert!(
-            write_paths.contains(&"/dashboard/api/predicates/candidates/:id/resolve"),
+            write_paths.contains(&"/dashboard/api/predicates/candidates/{id}/resolve"),
             "predicate candidate resolve endpoint must be a write route"
         );
         assert_eq!(

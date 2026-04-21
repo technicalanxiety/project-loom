@@ -113,11 +113,11 @@ async fn build_test_app() -> Router {
         .route("/dashboard/api/metrics/classification", get(dashboard::handle_metrics_classification))
         .route("/dashboard/api/metrics/hot-tier", get(dashboard::handle_metrics_hot_tier))
         .route(
-            "/dashboard/api/conflicts/:id/resolve",
+            "/dashboard/api/conflicts/{id}/resolve",
             post(dashboard::handle_resolve_conflict),
         )
         .route(
-            "/dashboard/api/predicates/candidates/:id/resolve",
+            "/dashboard/api/predicates/candidates/{id}/resolve",
             post(dashboard::handle_resolve_predicate_candidate),
         )
         .layer(middleware::from_fn_with_state(
@@ -493,7 +493,7 @@ async fn dashboard_endpoints_require_auth() {
 // Dashboard write endpoint validation tests
 // ---------------------------------------------------------------------------
 
-/// POST /dashboard/api/conflicts/:id/resolve — invalid resolution returns 400.
+/// POST /dashboard/api/conflicts/{id}/resolve — invalid resolution returns 400.
 #[tokio::test]
 async fn resolve_conflict_invalid_resolution_returns_400() {
     let app = build_test_app().await;
@@ -508,7 +508,7 @@ async fn resolve_conflict_invalid_resolution_returns_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
-/// POST /dashboard/api/conflicts/:id/resolve — "merged" without merged_into returns 400.
+/// POST /dashboard/api/conflicts/{id}/resolve — "merged" without merged_into returns 400.
 #[tokio::test]
 async fn resolve_conflict_merged_without_merged_into_returns_400() {
     let app = build_test_app().await;
@@ -523,7 +523,7 @@ async fn resolve_conflict_merged_without_merged_into_returns_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
-/// POST /dashboard/api/conflicts/:id/resolve — non-existent ID returns 404.
+/// POST /dashboard/api/conflicts/{id}/resolve — non-existent ID returns 404.
 #[tokio::test]
 async fn resolve_conflict_nonexistent_id_returns_404() {
     let app = build_test_app().await;
@@ -538,7 +538,7 @@ async fn resolve_conflict_nonexistent_id_returns_404() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
-/// POST /dashboard/api/predicates/candidates/:id/resolve — invalid action returns 400.
+/// POST /dashboard/api/predicates/candidates/{id}/resolve — invalid action returns 400.
 #[tokio::test]
 async fn resolve_predicate_candidate_invalid_action_returns_400() {
     let app = build_test_app().await;
@@ -553,7 +553,7 @@ async fn resolve_predicate_candidate_invalid_action_returns_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
-/// POST /dashboard/api/predicates/candidates/:id/resolve — action="map" without mapped_to returns 400.
+/// POST /dashboard/api/predicates/candidates/{id}/resolve — action="map" without mapped_to returns 400.
 #[tokio::test]
 async fn resolve_predicate_candidate_map_without_mapped_to_returns_400() {
     let app = build_test_app().await;
@@ -576,7 +576,7 @@ async fn resolve_predicate_candidate_map_without_mapped_to_returns_400() {
     );
 }
 
-/// POST /dashboard/api/predicates/candidates/:id/resolve — action="promote" without target_pack returns 400.
+/// POST /dashboard/api/predicates/candidates/{id}/resolve — action="promote" without target_pack returns 400.
 #[tokio::test]
 async fn resolve_predicate_candidate_promote_without_target_pack_returns_400() {
     let app = build_test_app().await;
@@ -596,7 +596,7 @@ async fn resolve_predicate_candidate_promote_without_target_pack_returns_400() {
     );
 }
 
-/// POST /dashboard/api/predicates/candidates/:id/resolve — non-existent ID returns 404.
+/// POST /dashboard/api/predicates/candidates/{id}/resolve — non-existent ID returns 404.
 #[tokio::test]
 async fn resolve_predicate_candidate_nonexistent_id_returns_404() {
     let app = build_test_app().await;
