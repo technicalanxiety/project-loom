@@ -4,6 +4,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod api;
 mod config;
+mod crypto;
 mod db;
 mod llm;
 mod pipeline;
@@ -20,7 +21,7 @@ async fn main() {
     // Install ring as the default rustls crypto provider (avoids aws-lc-sys
     // which cannot cross-compile to musl). Idempotent via Once — also called
     // from LlmClient::new so test harnesses don't need to do it themselves.
-    loom_engine::ensure_crypto_provider();
+    crypto::ensure_crypto_provider();
 
     // Load .env before tracing init so RUST_LOG is available.
     dotenvy::dotenv().ok();
