@@ -23,12 +23,7 @@ use axum::{
 use tower::ServiceExt;
 
 use loom_engine::{
-    api::{
-        auth::require_bearer_token,
-        dashboard,
-        mcp::AppState,
-        rest,
-    },
+    api::{auth::require_bearer_token, dashboard, mcp::AppState, rest},
     config::{AppConfig, LlmConfig},
     db::pool::DbPools,
     llm::client::LlmClient,
@@ -47,8 +42,7 @@ const TEST_BEARER_TOKEN: &str = "test-token";
 
 /// Build a test axum router connected to the test database.
 async fn build_test_app() -> Router {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
 
     let config = AppConfig {
         database_url: db_url.clone(),
@@ -62,6 +56,8 @@ async fn build_test_app() -> Router {
         pool_idle_timeout_secs: 300,
         statement_timeout_secs: 30,
         hot_tier_cache_ttl_secs: 60,
+        episode_max_attempts: 5,
+        episode_backoff_base_secs: 30,
         loom_host: "0.0.0.0".to_string(),
         loom_port: 8080,
         loom_bearer_token: TEST_BEARER_TOKEN.to_string(),
@@ -83,7 +79,11 @@ async fn build_test_app() -> Router {
 
     let llm_client = LlmClient::new(&config.llm).expect("LLM client");
     let bearer_token = config.loom_bearer_token.clone();
-    let state = AppState { pools, llm_client, config };
+    let state = AppState {
+        pools,
+        llm_client,
+        config,
+    };
 
     // REST /api/learn — bearer-token protected
     let rest_learn = Router::new()
@@ -101,17 +101,41 @@ async fn build_test_app() -> Router {
 
     // Dashboard routes — bearer-token protected
     let dashboard_routes = Router::new()
-        .route("/dashboard/api/health", get(dashboard::handle_dashboard_health))
-        .route("/dashboard/api/namespaces", get(dashboard::handle_namespaces))
-        .route("/dashboard/api/compilations", get(dashboard::handle_compilations))
+        .route(
+            "/dashboard/api/health",
+            get(dashboard::handle_dashboard_health),
+        )
+        .route(
+            "/dashboard/api/namespaces",
+            get(dashboard::handle_namespaces),
+        )
+        .route(
+            "/dashboard/api/compilations",
+            get(dashboard::handle_compilations),
+        )
         .route("/dashboard/api/entities", get(dashboard::handle_entities))
         .route("/dashboard/api/facts", get(dashboard::handle_facts))
         .route("/dashboard/api/conflicts", get(dashboard::handle_conflicts))
-        .route("/dashboard/api/predicates/candidates", get(dashboard::handle_predicate_candidates))
-        .route("/dashboard/api/predicates/packs", get(dashboard::handle_predicate_packs))
-        .route("/dashboard/api/metrics/retrieval", get(dashboard::handle_metrics_retrieval))
-        .route("/dashboard/api/metrics/classification", get(dashboard::handle_metrics_classification))
-        .route("/dashboard/api/metrics/hot-tier", get(dashboard::handle_metrics_hot_tier))
+        .route(
+            "/dashboard/api/predicates/candidates",
+            get(dashboard::handle_predicate_candidates),
+        )
+        .route(
+            "/dashboard/api/predicates/packs",
+            get(dashboard::handle_predicate_packs),
+        )
+        .route(
+            "/dashboard/api/metrics/retrieval",
+            get(dashboard::handle_metrics_retrieval),
+        )
+        .route(
+            "/dashboard/api/metrics/classification",
+            get(dashboard::handle_metrics_classification),
+        )
+        .route(
+            "/dashboard/api/metrics/hot-tier",
+            get(dashboard::handle_metrics_hot_tier),
+        )
         .route(
             "/dashboard/api/conflicts/{id}/resolve",
             post(dashboard::handle_resolve_conflict),
@@ -119,6 +143,14 @@ async fn build_test_app() -> Router {
         .route(
             "/dashboard/api/predicates/candidates/{id}/resolve",
             post(dashboard::handle_resolve_predicate_candidate),
+        )
+        .route(
+            "/dashboard/api/episodes/failed",
+            get(dashboard::handle_failed_episodes),
+        )
+        .route(
+            "/dashboard/api/episodes/{id}/requeue",
+            post(dashboard::handle_requeue_episode),
         )
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
@@ -227,7 +259,10 @@ async fn api_learn_valid_body_returns_200_with_episode_id() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
-    assert!(json.get("episode_id").is_some(), "response must contain episode_id");
+    assert!(
+        json.get("episode_id").is_some(),
+        "response must contain episode_id"
+    );
     assert!(json.get("status").is_some(), "response must contain status");
 
     let status = json["status"].as_str().unwrap();
@@ -252,16 +287,14 @@ async fn api_learn_forces_source_to_manual() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Verify the episode was stored with source="manual" by checking the DB
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
-    let source: Option<String> = sqlx::query_scalar(
-        "SELECT source FROM loom_episodes WHERE content LIKE $1 LIMIT 1",
-    )
-    .bind(format!("source override test%"))
-    .fetch_optional(&pool)
-    .await
-    .unwrap();
+    let source: Option<String> =
+        sqlx::query_scalar("SELECT source FROM loom_episodes WHERE content LIKE $1 LIMIT 1")
+            .bind(format!("source override test%"))
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
 
     if let Some(s) = source {
         assert_eq!(s, "manual", "source must be forced to 'manual'");
@@ -325,10 +358,22 @@ async fn api_health_response_has_required_fields() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
-    assert!(json.get("status").is_some(), "response must contain 'status'");
-    assert!(json.get("database").is_some(), "response must contain 'database'");
-    assert!(json.get("ollama").is_some(), "response must contain 'ollama'");
-    assert!(json.get("version").is_some(), "response must contain 'version'");
+    assert!(
+        json.get("status").is_some(),
+        "response must contain 'status'"
+    );
+    assert!(
+        json.get("database").is_some(),
+        "response must contain 'database'"
+    );
+    assert!(
+        json.get("ollama").is_some(),
+        "response must contain 'ollama'"
+    );
+    assert!(
+        json.get("version").is_some(),
+        "response must contain 'version'"
+    );
 
     let status = json["status"].as_str().unwrap();
     assert!(
@@ -355,6 +400,14 @@ async fn dashboard_health_returns_200_with_correct_shape() {
     assert!(json.get("facts_current").is_some());
     assert!(json.get("facts_superseded").is_some());
     assert!(json.get("queue_depth").is_some());
+    assert!(
+        json.get("failed_episode_count").is_some(),
+        "health response must surface failed_episode_count"
+    );
+    assert!(
+        json["failed_episode_count"].is_i64(),
+        "failed_episode_count must be an integer"
+    );
 }
 
 /// GET /dashboard/api/namespaces — returns 200 with array.
@@ -420,7 +473,10 @@ async fn dashboard_predicate_candidates_returns_200_with_array() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
-    assert!(json.is_array(), "predicate candidates response must be an array");
+    assert!(
+        json.is_array(),
+        "predicate candidates response must be an array"
+    );
 }
 
 /// GET /dashboard/api/predicates/packs — returns 200 with array.
@@ -442,8 +498,14 @@ async fn dashboard_metrics_retrieval_returns_200_with_correct_shape() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
-    assert!(json.get("daily_precision").is_some(), "must contain daily_precision");
-    assert!(json["daily_precision"].is_array(), "daily_precision must be an array");
+    assert!(
+        json.get("daily_precision").is_some(),
+        "must contain daily_precision"
+    );
+    assert!(
+        json["daily_precision"].is_array(),
+        "daily_precision must be an array"
+    );
 }
 
 /// GET /dashboard/api/metrics/classification — returns 200 with correct shape.
@@ -468,8 +530,14 @@ async fn dashboard_metrics_hot_tier_returns_200_with_correct_shape() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
-    assert!(json.get("by_namespace").is_some(), "must contain by_namespace");
-    assert!(json["by_namespace"].is_array(), "by_namespace must be an array");
+    assert!(
+        json.get("by_namespace").is_some(),
+        "must contain by_namespace"
+    );
+    assert!(
+        json["by_namespace"].is_array(),
+        "by_namespace must be an array"
+    );
 }
 
 /// Dashboard endpoints require auth — missing token returns 401.
@@ -499,12 +567,7 @@ async fn resolve_conflict_invalid_resolution_returns_400() {
     let app = build_test_app().await;
     let id = uuid::Uuid::new_v4();
     let body = serde_json::json!({ "resolution": "invalid_value" });
-    let resp = post_authed(
-        app,
-        &format!("/dashboard/api/conflicts/{id}/resolve"),
-        body,
-    )
-    .await;
+    let resp = post_authed(app, &format!("/dashboard/api/conflicts/{id}/resolve"), body).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -514,12 +577,7 @@ async fn resolve_conflict_merged_without_merged_into_returns_400() {
     let app = build_test_app().await;
     let id = uuid::Uuid::new_v4();
     let body = serde_json::json!({ "resolution": "merged" });
-    let resp = post_authed(
-        app,
-        &format!("/dashboard/api/conflicts/{id}/resolve"),
-        body,
-    )
-    .await;
+    let resp = post_authed(app, &format!("/dashboard/api/conflicts/{id}/resolve"), body).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -529,12 +587,7 @@ async fn resolve_conflict_nonexistent_id_returns_404() {
     let app = build_test_app().await;
     let id = uuid::Uuid::new_v4(); // random UUID, won't exist
     let body = serde_json::json!({ "resolution": "kept_separate" });
-    let resp = post_authed(
-        app,
-        &format!("/dashboard/api/conflicts/{id}/resolve"),
-        body,
-    )
-    .await;
+    let resp = post_authed(app, &format!("/dashboard/api/conflicts/{id}/resolve"), body).await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -627,10 +680,22 @@ async fn dashboard_namespaces_items_have_required_fields() {
 
     // If there are any namespaces, verify they have the required fields.
     for ns in arr {
-        assert!(ns.get("namespace").is_some(), "namespace object must have 'namespace' field");
-        assert!(ns.get("hot_tier_budget").is_some(), "namespace object must have 'hot_tier_budget'");
-        assert!(ns.get("warm_tier_budget").is_some(), "namespace object must have 'warm_tier_budget'");
-        assert!(ns.get("predicate_packs").is_some(), "namespace object must have 'predicate_packs'");
+        assert!(
+            ns.get("namespace").is_some(),
+            "namespace object must have 'namespace' field"
+        );
+        assert!(
+            ns.get("hot_tier_budget").is_some(),
+            "namespace object must have 'hot_tier_budget'"
+        );
+        assert!(
+            ns.get("warm_tier_budget").is_some(),
+            "namespace object must have 'warm_tier_budget'"
+        );
+        assert!(
+            ns.get("predicate_packs").is_some(),
+            "namespace object must have 'predicate_packs'"
+        );
     }
 }
 
@@ -666,4 +731,88 @@ async fn dashboard_facts_accepts_filters() {
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
     assert!(json.is_array());
+}
+
+// ---------------------------------------------------------------------------
+// Failed-episode surfacing and requeue endpoint tests
+// ---------------------------------------------------------------------------
+
+/// GET /dashboard/api/episodes/failed — returns 200 with array.
+#[tokio::test]
+async fn dashboard_failed_episodes_returns_200_with_array() {
+    let app = build_test_app().await;
+    let resp = get_authed(app, "/dashboard/api/episodes/failed").await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = body_json(resp).await;
+    assert!(json.is_array(), "failed episodes response must be an array");
+}
+
+/// POST /dashboard/api/episodes/{id}/requeue — non-existent ID returns 404.
+#[tokio::test]
+async fn requeue_nonexistent_episode_returns_404() {
+    let app = build_test_app().await;
+    let id = uuid::Uuid::new_v4();
+    let resp = post_authed(
+        app,
+        &format!("/dashboard/api/episodes/{id}/requeue"),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// POST /dashboard/api/episodes/{id}/requeue — resets a failed episode
+/// and returns the new state (`pending`, attempts=0).
+#[tokio::test]
+async fn requeue_failed_episode_resets_state() {
+    use loom_engine::db::episodes::{
+        claim_episode_for_processing, insert_episode, record_processing_failure, NewEpisode,
+    };
+
+    let app = build_test_app().await;
+
+    // Seed a failed episode directly via the DB layer so we can point the
+    // requeue endpoint at a known-bad row.
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+
+    let ep_input = NewEpisode {
+        source: format!("requeue-test-{}", uuid::Uuid::new_v4()),
+        source_id: None,
+        source_event_id: Some(format!("evt-{}", uuid::Uuid::new_v4())),
+        content: "content that would fail".to_string(),
+        content_hash: format!("hash-{}", uuid::Uuid::new_v4()),
+        occurred_at: chrono::Utc::now(),
+        namespace: format!("requeue-ns-{}", uuid::Uuid::new_v4()),
+        metadata: None,
+        participants: None,
+        ingestion_mode: "live_mcp_capture".to_string(),
+        parser_version: None,
+        parser_source_schema: None,
+    };
+    let ep = insert_episode(&pool, &ep_input).await.expect("insert");
+
+    // Two claim+fail cycles with max=2 drives the row to 'failed'.
+    for _ in 0..2 {
+        claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("claimed");
+        record_processing_failure(&pool, ep.id, "simulated", 2)
+            .await
+            .expect("record");
+    }
+
+    let resp = post_authed(
+        app,
+        &format!("/dashboard/api/episodes/{}/requeue", ep.id),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_json(resp).await;
+    assert_eq!(json["id"].as_str().unwrap(), ep.id.to_string());
+    assert_eq!(json["processing_status"].as_str().unwrap(), "pending");
+    assert_eq!(json["processing_attempts"].as_i64().unwrap(), 0);
 }

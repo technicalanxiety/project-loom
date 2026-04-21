@@ -63,10 +63,7 @@ pub struct NewEpisode {
 ///
 /// If an episode with the same `(source, source_event_id)` already exists the
 /// existing row is returned instead of inserting a duplicate.
-pub async fn insert_episode(
-    pool: &PgPool,
-    ep: &NewEpisode,
-) -> Result<Episode, EpisodeError> {
+pub async fn insert_episode(pool: &PgPool, ep: &NewEpisode) -> Result<Episode, EpisodeError> {
     // Check for existing episode by (source, source_event_id) when both are present.
     if let Some(ref event_id) = ep.source_event_id {
         let existing: Option<Episode> = sqlx::query_as::<_, Episode>(
@@ -118,16 +115,11 @@ pub async fn insert_episode(
 /// Fetch a single episode by its UUID.
 ///
 /// Returns `None` if no episode with the given id exists.
-pub async fn get_episode_by_id(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<Option<Episode>, EpisodeError> {
-    let row = sqlx::query_as::<_, Episode>(
-        "SELECT * FROM loom_episodes WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_episode_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Episode>, EpisodeError> {
+    let row = sqlx::query_as::<_, Episode>("SELECT * FROM loom_episodes WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(row)
 }
@@ -182,23 +174,39 @@ pub async fn query_episodes_by_namespace(
     Ok(rows)
 }
 
-/// List unprocessed episodes ordered by ingestion time (oldest first).
+/// List episodes ready for processing, honoring exponential backoff.
 ///
-/// Only returns episodes where `processed = false` and `deleted_at IS NULL`.
+/// Returns rows with `processing_status = 'pending'` and `deleted_at IS NULL`
+/// whose last attempt (if any) occurred more than `base_backoff_secs *
+/// 2^processing_attempts` seconds ago. Episodes currently in `processing`,
+/// `completed`, or `failed` state are skipped — the worker only picks up
+/// `pending` rows and atomically claims them via
+/// [`claim_episode_for_processing`] before running the pipeline.
+///
+/// Ordering prioritizes never-attempted episodes (fair to first-time work)
+/// then oldest-last-attempt ones.
 pub async fn list_unprocessed_episodes(
     pool: &PgPool,
     limit: i64,
+    base_backoff_secs: i64,
 ) -> Result<Vec<Episode>, EpisodeError> {
     let rows = sqlx::query_as::<_, Episode>(
         r#"
         SELECT *
         FROM loom_episodes
-        WHERE processed = false
+        WHERE processing_status = 'pending'
           AND deleted_at IS NULL
-        ORDER BY ingested_at ASC
-        LIMIT $1
+          AND (
+            processing_last_attempt IS NULL
+            OR processing_last_attempt
+               + ($1 * (1::bigint << LEAST(processing_attempts, 20))) * interval '1 second'
+               < NOW()
+          )
+        ORDER BY processing_last_attempt NULLS FIRST, ingested_at ASC
+        LIMIT $2
         "#,
     )
+    .bind(base_backoff_secs)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -238,8 +246,10 @@ pub async fn store_episode_embedding(
 
 /// Mark an episode as processed and store extraction metrics.
 ///
-/// Sets `processed = true` and writes the provided `extraction_metrics` JSONB
-/// value on the episode row.
+/// Sets `processing_status = 'completed'`, clears `processing_last_error`,
+/// and writes the provided `extraction_metrics` JSONB value on the episode
+/// row. `processed = true` is kept in sync for back-compat with read-side
+/// tooling that still consults the legacy boolean.
 pub async fn mark_episode_processed(
     pool: &PgPool,
     id: Uuid,
@@ -249,6 +259,8 @@ pub async fn mark_episode_processed(
         r#"
         UPDATE loom_episodes
         SET processed = true,
+            processing_status = 'completed',
+            processing_last_error = NULL,
             extraction_metrics = $2
         WHERE id = $1
         RETURNING *
@@ -260,6 +272,160 @@ pub async fn mark_episode_processed(
     .await?;
 
     Ok(row)
+}
+
+// ---------------------------------------------------------------------------
+// Processing lifecycle
+// ---------------------------------------------------------------------------
+
+/// Maximum characters of an error message persisted in `processing_last_error`.
+///
+/// Ollama 400 bodies can be long; truncating keeps the column readable in
+/// dashboards and bounds storage growth for episodes that fail repeatedly.
+const PROCESSING_ERROR_MAX_LEN: usize = 2000;
+
+/// Atomically claim an episode for processing.
+///
+/// Transitions the row from `pending` to `processing`, increments
+/// `processing_attempts`, and stamps `processing_last_attempt = NOW()`.
+/// Uses a single conditional UPDATE so two workers cannot both pick up the
+/// same episode: only one of them will see a returned row.
+///
+/// Returns `None` if the episode does not exist, is already in another
+/// state, or has been soft-deleted between polling and claim. Callers
+/// should treat `None` as "skip — someone else got it" and move on.
+pub async fn claim_episode_for_processing(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<Episode>, EpisodeError> {
+    let row = sqlx::query_as::<_, Episode>(
+        r#"
+        UPDATE loom_episodes
+        SET processing_status       = 'processing',
+            processing_attempts     = processing_attempts + 1,
+            processing_last_attempt = NOW()
+        WHERE id = $1
+          AND processing_status = 'pending'
+          AND deleted_at IS NULL
+        RETURNING *
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Record a processing failure and transition back to a retryable state.
+///
+/// If `processing_attempts >= max_attempts`, sets `processing_status =
+/// 'failed'` and stops further retries. Otherwise returns the row to
+/// `pending` so the next poll cycle reconsiders it under backoff.
+/// `processing_last_error` is populated with a truncated copy of `error`.
+pub async fn record_processing_failure(
+    pool: &PgPool,
+    id: Uuid,
+    error: &str,
+    max_attempts: i32,
+) -> Result<Episode, EpisodeError> {
+    let truncated = if error.len() > PROCESSING_ERROR_MAX_LEN {
+        // Slice on a char boundary so we never produce invalid UTF-8.
+        let mut cut = PROCESSING_ERROR_MAX_LEN;
+        while !error.is_char_boundary(cut) && cut > 0 {
+            cut -= 1;
+        }
+        &error[..cut]
+    } else {
+        error
+    };
+
+    let row = sqlx::query_as::<_, Episode>(
+        r#"
+        UPDATE loom_episodes
+        SET processing_status = CASE
+                WHEN processing_attempts >= $3 THEN 'failed'
+                ELSE 'pending'
+            END,
+            processing_last_error = $2
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(id)
+    .bind(truncated)
+    .bind(max_attempts)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Reset an episode to `pending` with `processing_attempts = 0`.
+///
+/// Escape hatch for operators: after fixing a root cause (e.g. swapping
+/// the embedding model to one with a larger context window), clear the
+/// failure state so the worker reprocesses the episode on its next poll.
+/// Clears `processing_last_error` as well so the dashboard does not show
+/// stale failure context.
+///
+/// Returns `None` if no episode with `id` exists.
+pub async fn requeue_episode(pool: &PgPool, id: Uuid) -> Result<Option<Episode>, EpisodeError> {
+    let row = sqlx::query_as::<_, Episode>(
+        r#"
+        UPDATE loom_episodes
+        SET processing_status       = 'pending',
+            processing_attempts     = 0,
+            processing_last_attempt = NULL,
+            processing_last_error   = NULL,
+            processed               = false
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Count episodes in `failed` state, excluding soft-deleted ones.
+pub async fn count_failed_episodes(pool: &PgPool) -> Result<i64, EpisodeError> {
+    let count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM loom_episodes
+        WHERE processing_status = 'failed'
+          AND deleted_at IS NULL
+        "#,
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count)
+}
+
+/// List failed episodes for dashboard surfacing, most recent failure first.
+///
+/// Returns rows with `processing_status = 'failed'` and `deleted_at IS
+/// NULL`, ordered by `processing_last_attempt DESC`.
+pub async fn list_failed_episodes(pool: &PgPool, limit: i64) -> Result<Vec<Episode>, EpisodeError> {
+    let rows = sqlx::query_as::<_, Episode>(
+        r#"
+        SELECT *
+        FROM loom_episodes
+        WHERE processing_status = 'failed'
+          AND deleted_at IS NULL
+        ORDER BY processing_last_attempt DESC NULLS LAST
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }
 
 /// Update extraction lineage fields on an episode.

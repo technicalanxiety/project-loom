@@ -29,8 +29,7 @@ const DEFAULT_TEST_DB_URL: &str = "postgres://loom_test:loom_test@localhost:5433
 
 /// Connect to the test database and run all pending migrations.
 async fn setup_test_pool() -> PgPool {
-    let db_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
 
     let pool = PgPool::connect(&db_url)
         .await
@@ -425,6 +424,8 @@ mod connection_pool_separation {
             pool_idle_timeout_secs: 300,
             statement_timeout_secs: 30,
             hot_tier_cache_ttl_secs: 60,
+            episode_max_attempts: 5,
+            episode_backoff_base_secs: 30,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -470,6 +471,8 @@ mod connection_pool_separation {
             pool_idle_timeout_secs: 300,
             statement_timeout_secs: 30,
             hot_tier_cache_ttl_secs: 60,
+            episode_max_attempts: 5,
+            episode_backoff_base_secs: 30,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -511,6 +514,8 @@ mod connection_pool_separation {
             pool_idle_timeout_secs: 300,
             statement_timeout_secs: 30,
             hot_tier_cache_ttl_secs: 60,
+            episode_max_attempts: 5,
+            episode_backoff_base_secs: 30,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -555,7 +560,8 @@ mod unit_tests {
         for source in &sources {
             let hash = compute_content_hash(content);
             assert_eq!(
-                hash.len(), 64,
+                hash.len(),
+                64,
                 "hash for source '{source}' must be 64 hex chars"
             );
         }

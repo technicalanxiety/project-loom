@@ -23,8 +23,7 @@ const DEFAULT_TEST_DB_URL: &str = "postgres://loom_test:loom_test@localhost:5433
 /// Uses `DATABASE_URL` env var if set, otherwise falls back to the default
 /// test database URL for docker-compose.test.yml.
 async fn setup_test_pool() -> PgPool {
-    let db_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
 
     let pool = PgPool::connect(&db_url)
         .await
@@ -158,9 +157,7 @@ mod episode_idempotency {
 /// **Validates: Requirement 3.1**
 mod entity_exact_match {
     use super::*;
-    use loom_engine::db::entities::{
-        get_entity_by_name_type_namespace, insert_entity, NewEntity,
-    };
+    use loom_engine::db::entities::{get_entity_by_name_type_namespace, insert_entity, NewEntity};
 
     #[tokio::test]
     async fn exact_match_finds_entity_by_name_type_namespace() {
@@ -205,7 +202,10 @@ mod entity_exact_match {
             .await
             .expect("query");
 
-        assert!(found.is_some(), "Should find entity with case-insensitive match");
+        assert!(
+            found.is_some(),
+            "Should find entity with case-insensitive match"
+        );
         assert_eq!(found.unwrap().id, inserted.id);
     }
 
@@ -289,7 +289,10 @@ mod entity_alias_match {
             .await
             .expect("alias query");
 
-        assert!(results.is_empty(), "Should not find entity with non-matching alias");
+        assert!(
+            results.is_empty(),
+            "Should not find entity with non-matching alias"
+        );
     }
 }
 
@@ -303,8 +306,7 @@ mod entity_alias_match {
 mod entity_embedding_similarity {
     use super::*;
     use loom_engine::db::entities::{
-        insert_entity, query_entities_by_embedding_similarity, update_entity_state,
-        NewEntity,
+        insert_entity, query_entities_by_embedding_similarity, update_entity_state, NewEntity,
     };
     use pgvector::Vector;
 
@@ -348,7 +350,10 @@ mod entity_embedding_similarity {
         .await
         .expect("similarity query");
 
-        assert!(!results.is_empty(), "Should find entity by embedding similarity");
+        assert!(
+            !results.is_empty(),
+            "Should find entity by embedding similarity"
+        );
         assert_eq!(results[0].id, inserted.id);
         assert!(
             results[0].similarity > 0.99,
@@ -429,7 +434,10 @@ mod fact_supersession {
             properties: None,
             source_episodes: None,
         };
-        insert_entity(pool, &entity).await.expect("insert entity").id
+        insert_entity(pool, &entity)
+            .await
+            .expect("insert entity")
+            .id
     }
 
     #[tokio::test]
@@ -437,9 +445,12 @@ mod fact_supersession {
         let pool = setup_test_pool().await;
 
         let ns = format!("test-ns-{}", Uuid::new_v4());
-        let subject_id = create_test_entity(&pool, &format!("SubjectA-{}", Uuid::new_v4()), &ns).await;
-        let object_id = create_test_entity(&pool, &format!("ObjectA-{}", Uuid::new_v4()), &ns).await;
-        let new_object_id = create_test_entity(&pool, &format!("ObjectB-{}", Uuid::new_v4()), &ns).await;
+        let subject_id =
+            create_test_entity(&pool, &format!("SubjectA-{}", Uuid::new_v4()), &ns).await;
+        let object_id =
+            create_test_entity(&pool, &format!("ObjectA-{}", Uuid::new_v4()), &ns).await;
+        let new_object_id =
+            create_test_entity(&pool, &format!("ObjectB-{}", Uuid::new_v4()), &ns).await;
 
         // Insert original fact
         let old_fact = insert_fact(
@@ -458,8 +469,14 @@ mod fact_supersession {
         .await
         .expect("insert old fact");
 
-        assert!(old_fact.valid_until.is_none(), "New fact should have no valid_until");
-        assert!(old_fact.superseded_by.is_none(), "New fact should have no superseded_by");
+        assert!(
+            old_fact.valid_until.is_none(),
+            "New fact should have no valid_until"
+        );
+        assert!(
+            old_fact.superseded_by.is_none(),
+            "New fact should have no superseded_by"
+        );
 
         // Insert contradicting fact
         let new_fact = insert_fact(
@@ -503,9 +520,12 @@ mod fact_supersession {
         let pool = setup_test_pool().await;
 
         let ns = format!("test-ns-{}", Uuid::new_v4());
-        let subject_id = create_test_entity(&pool, &format!("SubjectC-{}", Uuid::new_v4()), &ns).await;
-        let object_id = create_test_entity(&pool, &format!("ObjectC-{}", Uuid::new_v4()), &ns).await;
-        let new_object_id = create_test_entity(&pool, &format!("ObjectD-{}", Uuid::new_v4()), &ns).await;
+        let subject_id =
+            create_test_entity(&pool, &format!("SubjectC-{}", Uuid::new_v4()), &ns).await;
+        let object_id =
+            create_test_entity(&pool, &format!("ObjectC-{}", Uuid::new_v4()), &ns).await;
+        let new_object_id =
+            create_test_entity(&pool, &format!("ObjectD-{}", Uuid::new_v4()), &ns).await;
 
         // Insert and supersede a fact
         let old_fact = insert_fact(
@@ -571,15 +591,13 @@ mod fact_supersession {
 /// **Validates: Requirement 27.3**
 mod soft_deletion_filtering {
     use super::*;
-    use loom_engine::db::entities::{
-        get_entity_by_name_type_namespace, insert_entity, NewEntity,
-    };
+    use loom_engine::db::entities::{get_entity_by_name_type_namespace, insert_entity, NewEntity};
     use loom_engine::db::episodes::{
         insert_episode, query_episodes_by_namespace, soft_delete_episode, NewEpisode,
     };
     use loom_engine::db::facts::{
-        insert_fact, query_current_facts_by_namespace, query_facts_by_entity,
-        soft_delete_fact, NewFact,
+        insert_fact, query_current_facts_by_namespace, query_facts_by_entity, soft_delete_fact,
+        NewFact,
     };
 
     #[tokio::test]
@@ -723,7 +741,9 @@ mod soft_deletion_filtering {
         assert!(before_entity.iter().any(|f| f.id == fact.id));
 
         // Soft delete the fact
-        soft_delete_fact(&pool, fact.id).await.expect("soft delete fact");
+        soft_delete_fact(&pool, fact.id)
+            .await
+            .expect("soft delete fact");
 
         // Verify exclusion from both query types
         let after_ns = query_current_facts_by_namespace(&pool, &ns, 100)
@@ -754,9 +774,7 @@ mod soft_deletion_filtering {
 /// **Validates: Requirement 5.2**
 mod predicate_candidate_counting {
     use super::*;
-    use loom_engine::db::predicates::{
-        insert_or_update_candidate, query_candidates_by_threshold,
-    };
+    use loom_engine::db::predicates::{insert_or_update_candidate, query_candidates_by_threshold};
 
     #[tokio::test]
     async fn insert_or_update_increments_occurrences() {
@@ -797,7 +815,10 @@ mod predicate_candidate_counting {
         );
 
         // Verify example_facts contains all three fact IDs
-        let example_facts = ours.example_facts.as_ref().expect("should have example_facts");
+        let example_facts = ours
+            .example_facts
+            .as_ref()
+            .expect("should have example_facts");
         assert_eq!(example_facts.len(), 3, "Should have 3 example facts");
         assert!(example_facts.contains(&fact_id_1));
         assert!(example_facts.contains(&fact_id_2));
@@ -836,6 +857,363 @@ mod predicate_candidate_counting {
         assert!(
             !predicates.contains(&pred_low.as_str()),
             "Low-occurrence candidate should be excluded at threshold 5"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Episode processing lifecycle (retry / backoff / failed / requeue)
+// ---------------------------------------------------------------------------
+
+/// Tests for the processing-state machine introduced in migration 016.
+/// These guard against the poison-pill-retry-forever regression: an
+/// episode that fails deterministically must eventually transition to
+/// `failed` and stop consuming worker cycles.
+mod episode_processing_lifecycle {
+    use super::*;
+    use loom_engine::db::episodes::{
+        claim_episode_for_processing, count_failed_episodes, insert_episode, list_failed_episodes,
+        list_unprocessed_episodes, mark_episode_processed, record_processing_failure,
+        requeue_episode, NewEpisode,
+    };
+
+    /// Build a minimal NewEpisode with unique source_event_id so each test
+    /// owns its own row even when they run concurrently against a shared DB.
+    fn fresh_episode(content: &str) -> NewEpisode {
+        NewEpisode {
+            source: format!("test-{}", Uuid::new_v4()),
+            source_id: None,
+            source_event_id: Some(format!("evt-{}", Uuid::new_v4())),
+            content: content.to_string(),
+            content_hash: format!("hash-{}", Uuid::new_v4()),
+            occurred_at: Utc::now(),
+            namespace: format!("test-ns-{}", Uuid::new_v4()),
+            metadata: None,
+            participants: None,
+            ingestion_mode: "live_mcp_capture".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn new_episode_defaults_to_pending_with_zero_attempts() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("pending defaults"))
+            .await
+            .expect("insert");
+
+        assert_eq!(ep.processing_status, "pending");
+        assert_eq!(ep.processing_attempts, 0);
+        assert!(ep.processing_last_attempt.is_none());
+        assert!(ep.processing_last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn claim_transitions_pending_to_processing_and_increments_attempts() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("claim"))
+            .await
+            .expect("insert");
+
+        let claimed = claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("should be claimable");
+
+        assert_eq!(claimed.processing_status, "processing");
+        assert_eq!(claimed.processing_attempts, 1);
+        assert!(claimed.processing_last_attempt.is_some());
+    }
+
+    #[tokio::test]
+    async fn claim_is_atomic_second_caller_gets_none() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("atomic claim"))
+            .await
+            .expect("insert");
+
+        let first = claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("first claim");
+        let second = claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("second claim");
+
+        assert!(first.is_some(), "first claim should succeed");
+        assert!(
+            second.is_none(),
+            "second claim must return None — row is no longer pending"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_failure_below_max_returns_to_pending() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("retry"))
+            .await
+            .expect("insert");
+
+        // Claim pushes attempts to 1.
+        claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("claimed");
+
+        // attempts=1 < max_attempts=5 → pending.
+        let after = record_processing_failure(&pool, ep.id, "boom", 5)
+            .await
+            .expect("record failure");
+
+        assert_eq!(after.processing_status, "pending");
+        assert_eq!(after.processing_attempts, 1);
+        assert_eq!(after.processing_last_error.as_deref(), Some("boom"));
+    }
+
+    #[tokio::test]
+    async fn record_failure_at_max_transitions_to_failed() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("exhaust"))
+            .await
+            .expect("insert");
+
+        // Simulate hitting the max by claiming repeatedly: each claim
+        // requires returning to pending first, so loop claim → fail.
+        for _ in 0..3 {
+            claim_episode_for_processing(&pool, ep.id)
+                .await
+                .expect("claim")
+                .expect("claimed");
+            record_processing_failure(&pool, ep.id, "fail", 3)
+                .await
+                .expect("record");
+        }
+
+        let terminal = sqlx::query_as::<_, loom_engine::types::episode::Episode>(
+            "SELECT * FROM loom_episodes WHERE id = $1",
+        )
+        .bind(ep.id)
+        .fetch_one(&pool)
+        .await
+        .expect("fetch");
+
+        assert_eq!(terminal.processing_status, "failed");
+        assert_eq!(terminal.processing_attempts, 3);
+    }
+
+    #[tokio::test]
+    async fn failed_episode_not_returned_by_poll_query() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("poll-exclude"))
+            .await
+            .expect("insert");
+
+        // Burn through retries to land in 'failed'.
+        for _ in 0..2 {
+            claim_episode_for_processing(&pool, ep.id)
+                .await
+                .expect("claim")
+                .expect("claimed");
+            record_processing_failure(&pool, ep.id, "deterministic", 2)
+                .await
+                .expect("record");
+        }
+
+        // Poll with a generous batch; the failed episode must be excluded.
+        let pending = list_unprocessed_episodes(&pool, 100, 1)
+            .await
+            .expect("list");
+        assert!(
+            !pending.iter().any(|e| e.id == ep.id),
+            "failed episode must not appear in the pending poll result"
+        );
+    }
+
+    #[tokio::test]
+    async fn backoff_skips_recently_attempted_episode() {
+        let pool = setup_test_pool().await;
+        let input = fresh_episode("backoff");
+        // Capture the namespace so we can scope assertions to just the
+        // episodes this test owns — the test DB is shared across tests.
+        let namespace = input.namespace.clone();
+        let ep = insert_episode(&pool, &input).await.expect("insert");
+
+        // Claim once (attempts=1, last_attempt=now) and record failure so
+        // status returns to 'pending'.
+        claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("claimed");
+        record_processing_failure(&pool, ep.id, "transient", 5)
+            .await
+            .expect("record");
+
+        // Helper that applies the same backoff predicate as
+        // list_unprocessed_episodes but scoped to our unique namespace so
+        // cross-test data can't affect the result.
+        async fn is_ready_in_ns(pool: &PgPool, namespace: &str, base: i64) -> bool {
+            let count: i64 = sqlx::query_scalar(
+                r#"
+                SELECT COUNT(*)
+                FROM loom_episodes
+                WHERE namespace = $1
+                  AND processing_status = 'pending'
+                  AND deleted_at IS NULL
+                  AND (
+                    processing_last_attempt IS NULL
+                    OR processing_last_attempt
+                       + ($2 * (1::bigint << LEAST(processing_attempts, 20))) * interval '1 second'
+                       < NOW()
+                  )
+                "#,
+            )
+            .bind(namespace)
+            .bind(base)
+            .fetch_one(pool)
+            .await
+            .expect("scoped count");
+            count > 0
+        }
+
+        // With base=60s and attempts=1, backoff window is 120s. The
+        // episode should be skipped by the predicate.
+        assert!(
+            !is_ready_in_ns(&pool, &namespace, 60).await,
+            "episode under backoff must not be considered ready"
+        );
+
+        // With base=0s, the predicate becomes last_attempt < NOW() which
+        // holds for any past attempt, so the episode is ready.
+        assert!(
+            is_ready_in_ns(&pool, &namespace, 0).await,
+            "episode outside backoff window must be considered ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_processed_sets_completed_and_clears_error() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("complete"))
+            .await
+            .expect("insert");
+
+        // Simulate a prior failed attempt so there's an error on file.
+        claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("claimed");
+        record_processing_failure(&pool, ep.id, "earlier error", 5)
+            .await
+            .expect("record");
+
+        // Then succeed on the next attempt.
+        claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("claimed again");
+        let completed = mark_episode_processed(&pool, ep.id, &serde_json::json!({"ok": true}))
+            .await
+            .expect("mark processed");
+
+        assert_eq!(completed.processing_status, "completed");
+        assert_eq!(completed.processed, Some(true));
+        assert!(
+            completed.processing_last_error.is_none(),
+            "last_error should be cleared on success"
+        );
+    }
+
+    #[tokio::test]
+    async fn requeue_resets_status_attempts_and_error() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("requeue"))
+            .await
+            .expect("insert");
+
+        // Drive to 'failed'.
+        for _ in 0..2 {
+            claim_episode_for_processing(&pool, ep.id)
+                .await
+                .expect("claim")
+                .expect("claimed");
+            record_processing_failure(&pool, ep.id, "boom", 2)
+                .await
+                .expect("record");
+        }
+
+        let reset = requeue_episode(&pool, ep.id)
+            .await
+            .expect("requeue")
+            .expect("episode exists");
+
+        assert_eq!(reset.processing_status, "pending");
+        assert_eq!(reset.processing_attempts, 0);
+        assert!(reset.processing_last_attempt.is_none());
+        assert!(reset.processing_last_error.is_none());
+        assert_eq!(reset.processed, Some(false));
+    }
+
+    #[tokio::test]
+    async fn requeue_returns_none_for_unknown_id() {
+        let pool = setup_test_pool().await;
+        let missing = requeue_episode(&pool, Uuid::new_v4())
+            .await
+            .expect("requeue");
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_episodes_appear_in_list_and_count() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("surface"))
+            .await
+            .expect("insert");
+
+        // Exhaust retries.
+        for _ in 0..2 {
+            claim_episode_for_processing(&pool, ep.id)
+                .await
+                .expect("claim")
+                .expect("claimed");
+            record_processing_failure(&pool, ep.id, "reason", 2)
+                .await
+                .expect("record");
+        }
+
+        let count = count_failed_episodes(&pool).await.expect("count");
+        assert!(count >= 1, "expected at least one failed episode");
+
+        let listed = list_failed_episodes(&pool, 100).await.expect("list");
+        assert!(
+            listed.iter().any(|e| e.id == ep.id),
+            "failed episode must be surfaced in the failed-list query"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_failure_truncates_oversized_error_message() {
+        let pool = setup_test_pool().await;
+        let ep = insert_episode(&pool, &fresh_episode("truncate"))
+            .await
+            .expect("insert");
+        claim_episode_for_processing(&pool, ep.id)
+            .await
+            .expect("claim")
+            .expect("claimed");
+
+        // 10 KiB of 'x' — well beyond the 2000-char cap.
+        let huge = "x".repeat(10_000);
+        let after = record_processing_failure(&pool, ep.id, &huge, 5)
+            .await
+            .expect("record");
+
+        let stored = after
+            .processing_last_error
+            .expect("error should be populated");
+        assert!(
+            stored.len() <= 2000,
+            "stored error should be truncated to <= 2000 chars, got {}",
+            stored.len()
         );
     }
 }

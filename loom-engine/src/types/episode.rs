@@ -58,8 +58,21 @@ pub struct Episode {
     pub embedding: Option<pgvector::Vector>,
     /// Derived tags.
     pub tags: Option<Vec<String>>,
-    /// Whether the extraction pipeline has completed.
+    /// Legacy boolean completion flag. Retained for read-side compatibility;
+    /// new code should consult `processing_status` instead.
     pub processed: Option<bool>,
+    /// Lifecycle state for the background worker: `pending`, `processing`,
+    /// `completed`, or `failed`. Enforced by CHECK constraint in migration 016.
+    pub processing_status: String,
+    /// Number of times the worker has attempted to process this episode.
+    pub processing_attempts: i32,
+    /// When the most recent processing attempt started. `None` before the
+    /// first attempt. Used with `processing_attempts` to compute backoff.
+    pub processing_last_attempt: Option<DateTime<Utc>>,
+    /// Error message from the most recent failed attempt, truncated to a
+    /// reasonable length before persistence. `None` on success or before
+    /// the first attempt.
+    pub processing_last_error: Option<String>,
     /// Soft-delete timestamp.
     pub deleted_at: Option<DateTime<Utc>>,
     /// Reason for soft deletion.

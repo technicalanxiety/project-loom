@@ -32,6 +32,14 @@ pub struct AppConfig {
     pub statement_timeout_secs: u64,
     /// Hot tier cache TTL in seconds (default: 60).
     pub hot_tier_cache_ttl_secs: u64,
+    /// Maximum processing attempts before an episode is marked `failed`
+    /// (default: 5). Past this, the worker stops retrying and the episode
+    /// is surfaced on the dashboard for operator requeue.
+    pub episode_max_attempts: i32,
+    /// Base backoff in seconds between episode retries (default: 30). Actual
+    /// delay for attempt N is `base * 2^N`, so with defaults: 30s, 60s,
+    /// 120s, 240s, 480s for attempts 1–5.
+    pub episode_backoff_base_secs: i64,
     /// Bind address for the HTTP server.
     pub loom_host: String,
     /// Port for the HTTP server.
@@ -72,8 +80,8 @@ impl AppConfig {
     /// `AZURE_OPENAI_URL`, `AZURE_OPENAI_KEY`,
     /// `LOOM_HOST` (default `0.0.0.0`), `LOOM_PORT` (default `8080`)
     pub fn from_env() -> Result<Self, String> {
-        let database_url = env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL must be set".to_string())?;
+        let database_url =
+            env::var("DATABASE_URL").map_err(|_| "DATABASE_URL must be set".to_string())?;
 
         let database_url_online = env::var("DATABASE_URL_ONLINE").ok();
         let database_url_offline = env::var("DATABASE_URL_OFFLINE").ok();
@@ -118,6 +126,26 @@ impl AppConfig {
             .parse::<u64>()
             .map_err(|e| format!("HOT_TIER_CACHE_TTL_SECS must be a valid u64: {e}"))?;
 
+        let episode_max_attempts = env::var("EPISODE_MAX_ATTEMPTS")
+            .unwrap_or_else(|_| "5".to_string())
+            .parse::<i32>()
+            .map_err(|e| format!("EPISODE_MAX_ATTEMPTS must be a valid i32: {e}"))?;
+        if episode_max_attempts < 1 {
+            return Err(format!(
+                "EPISODE_MAX_ATTEMPTS must be >= 1, got {episode_max_attempts}"
+            ));
+        }
+
+        let episode_backoff_base_secs = env::var("EPISODE_BACKOFF_BASE_SECS")
+            .unwrap_or_else(|_| "30".to_string())
+            .parse::<i64>()
+            .map_err(|e| format!("EPISODE_BACKOFF_BASE_SECS must be a valid i64: {e}"))?;
+        if episode_backoff_base_secs < 1 {
+            return Err(format!(
+                "EPISODE_BACKOFF_BASE_SECS must be >= 1, got {episode_backoff_base_secs}"
+            ));
+        }
+
         let loom_host = env::var("LOOM_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let loom_port = env::var("LOOM_PORT")
             .unwrap_or_else(|_| "8080".to_string())
@@ -127,21 +155,17 @@ impl AppConfig {
         let loom_bearer_token = env::var("LOOM_BEARER_TOKEN")
             .map_err(|_| "LOOM_BEARER_TOKEN must be set".to_string())?;
 
-        let ollama_url = env::var("OLLAMA_URL")
-            .map_err(|_| "OLLAMA_URL must be set".to_string())?;
-        let extraction_model = env::var("EXTRACTION_MODEL")
-            .map_err(|_| "EXTRACTION_MODEL must be set".to_string())?;
+        let ollama_url =
+            env::var("OLLAMA_URL").map_err(|_| "OLLAMA_URL must be set".to_string())?;
+        let extraction_model =
+            env::var("EXTRACTION_MODEL").map_err(|_| "EXTRACTION_MODEL must be set".to_string())?;
         let classification_model = env::var("CLASSIFICATION_MODEL")
             .map_err(|_| "CLASSIFICATION_MODEL must be set".to_string())?;
-        let embedding_model = env::var("EMBEDDING_MODEL")
-            .map_err(|_| "EMBEDDING_MODEL must be set".to_string())?;
+        let embedding_model =
+            env::var("EMBEDDING_MODEL").map_err(|_| "EMBEDDING_MODEL must be set".to_string())?;
 
-        let azure_openai_url = env::var("AZURE_OPENAI_URL")
-            .ok()
-            .filter(|s| !s.is_empty());
-        let azure_openai_key = env::var("AZURE_OPENAI_KEY")
-            .ok()
-            .filter(|s| !s.is_empty());
+        let azure_openai_url = env::var("AZURE_OPENAI_URL").ok().filter(|s| !s.is_empty());
+        let azure_openai_key = env::var("AZURE_OPENAI_KEY").ok().filter(|s| !s.is_empty());
 
         Ok(Self {
             database_url,
@@ -155,6 +179,8 @@ impl AppConfig {
             pool_idle_timeout_secs,
             statement_timeout_secs,
             hot_tier_cache_ttl_secs,
+            episode_max_attempts,
+            episode_backoff_base_secs,
             loom_host,
             loom_port,
             loom_bearer_token,

@@ -1,8 +1,25 @@
 //! Background episode processing loop (tokio spawned tasks).
 //!
-//! Polls for unprocessed episodes using the offline connection pool and
-//! spawns concurrent tokio tasks to generate embeddings and mark episodes
-//! as processed. Concurrency is controlled via a [`tokio::sync::Semaphore`].
+//! Polls for pending episodes using the offline connection pool and spawns
+//! concurrent tokio tasks to generate embeddings and mark episodes as
+//! processed. Concurrency is controlled via a [`tokio::sync::Semaphore`].
+//!
+//! # Retry and backoff
+//!
+//! Each episode carries a `processing_status` state machine (`pending` →
+//! `processing` → `completed` | `failed`) and a `processing_attempts`
+//! counter. On failure, `processing_attempts` is incremented and the row
+//! returns to `pending` with the error message stored in
+//! `processing_last_error`. The next poll applies exponential backoff:
+//! an episode is only re-picked once `now() - processing_last_attempt >
+//! base_backoff * 2^processing_attempts`. After `max_attempts` failures
+//! the row transitions to `failed` and the worker stops retrying it —
+//! the dashboard surfaces these for operator requeue.
+//!
+//! This is the architectural fix for the poison-pill bug: before this
+//! retry state was introduced, an episode that the embedding model could
+//! never process (e.g. content exceeding the model's context window) was
+//! retried every 5 seconds forever, generating unbounded LLM load.
 //!
 //! The processing loop is cancellable via a [`tokio_util::sync::CancellationToken`].
 
@@ -55,6 +72,27 @@ const DEFAULT_MAX_CONCURRENCY: usize = 4;
 /// Maximum number of unprocessed episodes to fetch per poll cycle.
 const BATCH_SIZE: i64 = 10;
 
+/// Retry policy for the processing loop. Propagated from `AppConfig` so
+/// operators can tune both knobs without recompiling.
+#[derive(Debug, Clone, Copy)]
+pub struct RetryPolicy {
+    /// Episode is marked `failed` once `processing_attempts` reaches this.
+    pub max_attempts: i32,
+    /// Base delay in seconds; actual backoff is `base * 2^attempts`.
+    pub base_backoff_secs: i64,
+}
+
+impl RetryPolicy {
+    /// Build a retry policy with the defaults from `AppConfig` (5 attempts,
+    /// 30s base).
+    pub const fn new(max_attempts: i32, base_backoff_secs: i64) -> Self {
+        Self {
+            max_attempts,
+            base_backoff_secs,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -62,11 +100,12 @@ const BATCH_SIZE: i64 = 10;
 /// Start the background episode processing loop.
 ///
 /// Spawns a long-running tokio task that:
-/// 1. Polls for unprocessed episodes every `poll_interval` seconds.
-/// 2. For each unprocessed episode, acquires a semaphore permit and spawns
-///    a tokio task that generates an embedding, stores it, and marks the
-///    episode as processed.
-/// 3. Stops gracefully when the `cancel_token` is cancelled.
+/// 1. Polls for pending episodes every `poll_interval` seconds, filtering
+///    by the current backoff window.
+/// 2. For each episode, acquires a semaphore permit and spawns a tokio
+///    task that atomically claims the row, runs the extraction pipeline,
+///    and records success or failure.
+/// 3. Stops gracefully when `cancel_token` is cancelled.
 ///
 /// Returns a [`tokio::task::JoinHandle`] for the processing loop task.
 ///
@@ -75,6 +114,7 @@ const BATCH_SIZE: i64 = 10;
 /// * `pool` — The **offline** database connection pool.
 /// * `client` — The LLM client for embedding generation.
 /// * `config` — LLM configuration (embedding model name, etc.).
+/// * `retry_policy` — Max attempts and backoff base.
 /// * `cancel_token` — Token to signal graceful shutdown.
 /// * `poll_interval` — Optional polling interval override (default: 5s).
 /// * `max_concurrency` — Optional concurrency limit override (default: 4).
@@ -82,6 +122,7 @@ pub fn start_processing_loop(
     pool: PgPool,
     client: LlmClient,
     config: LlmConfig,
+    retry_policy: RetryPolicy,
     cancel_token: CancellationToken,
     poll_interval: Option<Duration>,
     max_concurrency: Option<usize>,
@@ -93,11 +134,22 @@ pub fn start_processing_loop(
     tracing::info!(
         poll_interval_secs = interval.as_secs(),
         max_concurrency = concurrency,
+        max_attempts = retry_policy.max_attempts,
+        base_backoff_secs = retry_policy.base_backoff_secs,
         "starting background episode processing loop"
     );
 
     tokio::spawn(async move {
-        processing_loop(pool, client, config, cancel_token, interval, semaphore).await;
+        processing_loop(
+            pool,
+            client,
+            config,
+            retry_policy,
+            cancel_token,
+            interval,
+            semaphore,
+        )
+        .await;
     })
 }
 
@@ -110,6 +162,7 @@ async fn processing_loop(
     pool: PgPool,
     client: LlmClient,
     config: LlmConfig,
+    retry_policy: RetryPolicy,
     cancel_token: CancellationToken,
     interval: Duration,
     semaphore: Arc<Semaphore>,
@@ -121,7 +174,15 @@ async fn processing_loop(
                 break;
             }
             _ = tokio::time::sleep(interval) => {
-                poll_and_process(&pool, &client, &config, &semaphore, &cancel_token).await;
+                poll_and_process(
+                    &pool,
+                    &client,
+                    &config,
+                    retry_policy,
+                    &semaphore,
+                    &cancel_token,
+                )
+                .await;
             }
         }
     }
@@ -129,30 +190,34 @@ async fn processing_loop(
     tracing::info!("processing loop exited");
 }
 
-/// Poll for unprocessed episodes and spawn processing tasks.
+/// Poll for pending episodes (respecting backoff) and spawn processing tasks.
 async fn poll_and_process(
     pool: &PgPool,
     client: &LlmClient,
     config: &LlmConfig,
+    retry_policy: RetryPolicy,
     semaphore: &Arc<Semaphore>,
     cancel_token: &CancellationToken,
 ) {
-    let unprocessed = match episodes::list_unprocessed_episodes(pool, BATCH_SIZE).await {
-        Ok(eps) => eps,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to poll unprocessed episodes");
-            return;
-        }
-    };
+    let candidates =
+        match episodes::list_unprocessed_episodes(pool, BATCH_SIZE, retry_policy.base_backoff_secs)
+            .await
+        {
+            Ok(eps) => eps,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to poll pending episodes");
+                return;
+            }
+        };
 
-    if unprocessed.is_empty() {
-        tracing::trace!("no unprocessed episodes found");
+    if candidates.is_empty() {
+        tracing::trace!("no pending episodes ready for processing");
         return;
     }
 
-    tracing::info!(count = unprocessed.len(), "found unprocessed episodes");
+    tracing::info!(count = candidates.len(), "found pending episodes");
 
-    for episode in unprocessed {
+    for episode in candidates {
         // Check cancellation before spawning new work.
         if cancel_token.is_cancelled() {
             tracing::info!("cancellation detected, stopping new task spawning");
@@ -177,22 +242,94 @@ async fn poll_and_process(
                 }
             };
 
-            let episode_id = episode.id;
-            tracing::info!(episode_id = %episode_id, "processing episode");
+            process_with_retry_bookkeeping(&pool, &client, &config, retry_policy, episode.id).await;
+        });
+    }
+}
 
-            match process_single_episode(&pool, &client, &config, &episode).await {
-                Ok(()) => {
-                    tracing::info!(episode_id = %episode_id, "episode processing complete");
+/// Atomically claim an episode and run its extraction pipeline, recording
+/// success or failure in the new processing-state columns.
+///
+/// Must re-fetch the episode via [`episodes::claim_episode_for_processing`]
+/// rather than use the row already loaded by the polling query: the claim
+/// is the atomic `pending → processing` transition and also increments the
+/// attempts counter. If the claim returns `None`, another worker beat us
+/// to it — this is expected under concurrent workers and we quietly skip.
+async fn process_with_retry_bookkeeping(
+    pool: &PgPool,
+    client: &LlmClient,
+    config: &LlmConfig,
+    retry_policy: RetryPolicy,
+    episode_id: Uuid,
+) {
+    let claimed = match episodes::claim_episode_for_processing(pool, episode_id).await {
+        Ok(Some(ep)) => ep,
+        Ok(None) => {
+            tracing::debug!(
+                episode_id = %episode_id,
+                "episode not claimable (already taken, soft-deleted, or in terminal state)"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!(
+                episode_id = %episode_id,
+                error = %e,
+                "failed to claim episode for processing"
+            );
+            return;
+        }
+    };
+
+    tracing::info!(
+        episode_id = %episode_id,
+        attempt = claimed.processing_attempts,
+        "processing episode"
+    );
+
+    match process_single_episode(pool, client, config, &claimed).await {
+        Ok(()) => {
+            tracing::info!(episode_id = %episode_id, "episode processing complete");
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            match episodes::record_processing_failure(
+                pool,
+                episode_id,
+                &error_msg,
+                retry_policy.max_attempts,
+            )
+            .await
+            {
+                Ok(updated) => {
+                    if updated.processing_status == "failed" {
+                        tracing::error!(
+                            episode_id = %episode_id,
+                            attempts = updated.processing_attempts,
+                            max_attempts = retry_policy.max_attempts,
+                            error = %error_msg,
+                            "episode exhausted retries — marked as failed"
+                        );
+                    } else {
+                        tracing::warn!(
+                            episode_id = %episode_id,
+                            attempts = updated.processing_attempts,
+                            max_attempts = retry_policy.max_attempts,
+                            error = %error_msg,
+                            "episode processing failed — will retry after backoff"
+                        );
+                    }
                 }
-                Err(e) => {
+                Err(db_err) => {
                     tracing::error!(
                         episode_id = %episode_id,
-                        error = %e,
-                        "episode processing failed"
+                        original_error = %error_msg,
+                        db_error = %db_err,
+                        "episode processing failed AND failure bookkeeping failed"
                     );
                 }
             }
-        });
+        }
     }
 }
 
@@ -244,11 +381,7 @@ pub async fn process_single_episode(
 
     tracing::info!(episode_id = %episode_id, "starting full extraction pipeline");
 
-    match extract_pipeline::run_full_extraction_pipeline(
-        pool, client, config, episode,
-    )
-    .await
-    {
+    match extract_pipeline::run_full_extraction_pipeline(pool, client, config, episode).await {
         Ok(result) => {
             tracing::info!(
                 episode_id = %episode_id,
@@ -385,9 +518,8 @@ mod tests {
 
     #[test]
     fn processor_error_pipeline_displays_message() {
-        let err = ProcessorError::Pipeline(PipelineError::Database(
-            "connection refused".to_string(),
-        ));
+        let err =
+            ProcessorError::Pipeline(PipelineError::Database("connection refused".to_string()));
         let msg = err.to_string();
         assert!(msg.contains("pipeline error"), "got: {msg}");
     }
@@ -400,21 +532,15 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
 
         let (client, config) = test_config(&server.uri());
-        let result = generate_episode_embedding_with_retry(
-            &client,
-            &config,
-            "test content",
-            Uuid::new_v4(),
-        )
-        .await;
+        let result =
+            generate_episode_embedding_with_retry(&client, &config, "test content", Uuid::new_v4())
+                .await;
 
         let vec = result.expect("should succeed on first attempt");
         assert_eq!(vec.len(), 768);
@@ -427,9 +553,7 @@ mod tests {
         // First call returns 500, second succeeds.
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(500).set_body_string("server error"),
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
             .up_to_n_times(1)
             .expect(1)
             .mount(&server)
@@ -437,21 +561,15 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
 
         let (client, config) = test_config(&server.uri());
-        let result = generate_episode_embedding_with_retry(
-            &client,
-            &config,
-            "test content",
-            Uuid::new_v4(),
-        )
-        .await;
+        let result =
+            generate_episode_embedding_with_retry(&client, &config, "test content", Uuid::new_v4())
+                .await;
 
         let vec = result.expect("should succeed after retry");
         assert_eq!(vec.len(), 768);
@@ -464,22 +582,16 @@ mod tests {
         // All calls return dimension mismatch (512 instead of 768).
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(512)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(512)))
             .expect(3)
             .mount(&server)
             .await;
 
         let (client, config) = test_config(&server.uri());
-        let err = generate_episode_embedding_with_retry(
-            &client,
-            &config,
-            "test content",
-            Uuid::new_v4(),
-        )
-        .await
-        .unwrap_err();
+        let err =
+            generate_episode_embedding_with_retry(&client, &config, "test content", Uuid::new_v4())
+                .await
+                .unwrap_err();
 
         assert!(matches!(
             err,
@@ -518,6 +630,7 @@ mod tests {
                 unreachable_pool(),
                 client,
                 config,
+                RetryPolicy::new(5, 30),
                 cancel_token,
                 Duration::from_secs(60), // Long interval so sleep wins
                 semaphore,
@@ -527,7 +640,10 @@ mod tests {
 
         // The handle should complete quickly since we cancelled.
         let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
-        assert!(result.is_ok(), "processing loop should exit on cancellation");
+        assert!(
+            result.is_ok(),
+            "processing loop should exit on cancellation"
+        );
     }
 
     /// Create a "dummy" pool that will panic if used. Only for testing
@@ -556,6 +672,7 @@ mod tests {
             pool,
             client,
             config,
+            RetryPolicy::new(5, 30),
             cancel_token.clone(),
             Some(Duration::from_secs(60)),
             Some(2),
@@ -685,7 +802,11 @@ mod tests {
         assert_eq!(json["extraction_model"], "test-model");
 
         // Still has all required fields.
-        assert!(obj.len() >= 13, "should have at least 13 fields, got {}", obj.len());
+        assert!(
+            obj.len() >= 13,
+            "should have at least 13 fields, got {}",
+            obj.len()
+        );
     }
 
     #[test]
@@ -753,6 +874,7 @@ mod tests {
             pool,
             client,
             config,
+            RetryPolicy::new(5, 30),
             cancel_token.clone(),
             Some(Duration::from_secs(60)),
             Some(1),
@@ -760,7 +882,10 @@ mod tests {
 
         cancel_token.cancel();
         let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
-        assert!(result.is_ok(), "should exit cleanly with custom concurrency");
+        assert!(
+            result.is_ok(),
+            "should exit cleanly with custom concurrency"
+        );
     }
 
     #[tokio::test]
@@ -775,6 +900,7 @@ mod tests {
             pool,
             client,
             config,
+            RetryPolicy::new(5, 30),
             cancel_token.clone(),
             None,
             None,
@@ -783,5 +909,14 @@ mod tests {
         cancel_token.cancel();
         let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
         assert!(result.is_ok(), "should exit cleanly with default params");
+    }
+
+    // -- RetryPolicy --------------------------------------------------------
+
+    #[test]
+    fn retry_policy_new_sets_both_fields() {
+        let p = RetryPolicy::new(7, 45);
+        assert_eq!(p.max_attempts, 7);
+        assert_eq!(p.base_backoff_secs, 45);
     }
 }

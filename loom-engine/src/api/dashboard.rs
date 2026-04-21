@@ -143,12 +143,48 @@ pub struct PipelineHealthResponse {
     pub facts_current: i64,
     /// Number of superseded facts.
     pub facts_superseded: i64,
-    /// Number of unprocessed episodes in the queue.
+    /// Number of pending episodes awaiting processing (excluding failed
+    /// and currently-processing episodes).
     pub queue_depth: i64,
+    /// Number of episodes that exhausted retries and are parked in the
+    /// `failed` state. Non-zero means an operator should investigate and
+    /// either fix the root cause + requeue, or soft-delete the episode.
+    pub failed_episode_count: i64,
     /// Most recently used extraction model.
     pub extraction_model: Option<String>,
     /// Most recently used classification model.
     pub classification_model: Option<String>,
+}
+
+/// Summary of a failed episode surfaced by the dashboard so operators can
+/// triage why extraction couldn't complete.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailedEpisodeSummary {
+    /// Episode identifier.
+    pub id: Uuid,
+    /// Source system.
+    pub source: String,
+    /// Namespace.
+    pub namespace: String,
+    /// When the episode was originally ingested.
+    pub ingested_at: DateTime<Utc>,
+    /// Number of attempts the worker made before giving up.
+    pub processing_attempts: i32,
+    /// Timestamp of the final attempt.
+    pub processing_last_attempt: Option<DateTime<Utc>>,
+    /// Truncated error from the final attempt.
+    pub processing_last_error: Option<String>,
+}
+
+/// Response after requeuing a failed (or any) episode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequeueEpisodeResponse {
+    /// Episode identifier.
+    pub id: Uuid,
+    /// Status after requeue — should be `pending`.
+    pub processing_status: String,
+    /// Attempts counter after requeue — should be `0`.
+    pub processing_attempts: i32,
 }
 
 /// Namespace configuration info.
@@ -754,9 +790,16 @@ pub async fn handle_dashboard_health(
     .fetch_one(pool)
     .await?;
 
-    // Queue depth: unprocessed episodes
+    // Queue depth: pending episodes only (exclude failed/processing).
     let queue_depth: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM loom_episodes WHERE processed = false AND deleted_at IS NULL",
+        "SELECT COUNT(*) FROM loom_episodes WHERE processing_status = 'pending' AND deleted_at IS NULL",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    // Failed episodes: exhausted retries, parked for operator triage.
+    let failed_episode_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM loom_episodes WHERE processing_status = 'failed' AND deleted_at IS NULL",
     )
     .fetch_one(pool)
     .await?;
@@ -782,19 +825,29 @@ pub async fn handle_dashboard_health(
     Ok(Json(PipelineHealthResponse {
         episodes_by_source: episodes_by_source
             .into_iter()
-            .map(|r| CountByKey { key: r.key, count: r.count })
+            .map(|r| CountByKey {
+                key: r.key,
+                count: r.count,
+            })
             .collect(),
         episodes_by_namespace: episodes_by_namespace
             .into_iter()
-            .map(|r| CountByKey { key: r.key, count: r.count })
+            .map(|r| CountByKey {
+                key: r.key,
+                count: r.count,
+            })
             .collect(),
         entities_by_type: entities_by_type
             .into_iter()
-            .map(|r| CountByKey { key: r.key, count: r.count })
+            .map(|r| CountByKey {
+                key: r.key,
+                count: r.count,
+            })
             .collect(),
         facts_current,
         facts_superseded,
         queue_depth,
+        failed_episode_count,
         extraction_model,
         classification_model,
     }))
@@ -826,7 +879,9 @@ pub async fn handle_namespaces(
             namespace: r.namespace,
             hot_tier_budget: r.hot_tier_budget.unwrap_or(500),
             warm_tier_budget: r.warm_tier_budget.unwrap_or(3000),
-            predicate_packs: r.predicate_packs.unwrap_or_else(|| vec!["core".to_string()]),
+            predicate_packs: r
+                .predicate_packs
+                .unwrap_or_else(|| vec!["core".to_string()]),
             description: r.description,
         })
         .collect();
@@ -1051,7 +1106,9 @@ pub async fn handle_entity_detail(
         .collect();
 
     let aliases = extract_aliases(&entity.properties);
-    let properties = entity.properties.unwrap_or(serde_json::Value::Object(Default::default()));
+    let properties = entity
+        .properties
+        .unwrap_or(serde_json::Value::Object(Default::default()));
 
     Ok(Json(EntityDetail {
         id: entity.id,
@@ -1311,12 +1368,11 @@ pub async fn handle_pack_detail(
     let pool = &state.pools.online;
 
     // Fetch pack metadata
-    let pack_row: Option<(String, Option<String>)> = sqlx::query_as(
-        "SELECT pack, description FROM loom_predicate_packs WHERE pack = $1",
-    )
-    .bind(&pack)
-    .fetch_optional(pool)
-    .await?;
+    let pack_row: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT pack, description FROM loom_predicate_packs WHERE pack = $1")
+            .bind(&pack)
+            .fetch_optional(pool)
+            .await?;
 
     let (pack_name, description) = pack_row.ok_or(DashboardError::NotFound)?;
 
@@ -1549,7 +1605,10 @@ pub async fn handle_metrics_extraction(
 
     let resolution_distribution = resolution_rows
         .into_iter()
-        .map(|r| CountByKey { key: r.key, count: r.count })
+        .map(|r| CountByKey {
+            key: r.key,
+            count: r.count,
+        })
         .collect();
 
     let custom_predicate_growth = growth_rows
@@ -1622,7 +1681,10 @@ pub async fn handle_metrics_classification(
 
     let class_distribution = class_rows
         .into_iter()
-        .map(|r| CountByKey { key: r.key, count: r.count })
+        .map(|r| CountByKey {
+            key: r.key,
+            count: r.count,
+        })
         .collect();
 
     Ok(Json(ClassificationMetrics {
@@ -1875,12 +1937,11 @@ pub async fn handle_resolve_predicate_candidate(
     let pool = &state.pools.online;
 
     // Fetch the candidate to get its predicate text.
-    let candidate: Option<CandidateLookupRow> = sqlx::query_as(
-        "SELECT id, predicate FROM loom_predicate_candidates WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+    let candidate: Option<CandidateLookupRow> =
+        sqlx::query_as("SELECT id, predicate FROM loom_predicate_candidates WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
 
     let candidate = candidate.ok_or(DashboardError::NotFound)?;
 
@@ -1895,12 +1956,11 @@ pub async fn handle_resolve_predicate_candidate(
             })?;
 
             // Validate the target canonical predicate exists.
-            let exists: Option<(String,)> = sqlx::query_as(
-                "SELECT predicate FROM loom_predicates WHERE predicate = $1",
-            )
-            .bind(mapped_to)
-            .fetch_optional(pool)
-            .await?;
+            let exists: Option<(String,)> =
+                sqlx::query_as("SELECT predicate FROM loom_predicates WHERE predicate = $1")
+                    .bind(mapped_to)
+                    .fetch_optional(pool)
+                    .await?;
 
             if exists.is_none() {
                 return Err(DashboardError::InvalidRequest(format!(
@@ -1947,12 +2007,11 @@ pub async fn handle_resolve_predicate_candidate(
             })?;
 
             // Validate target_pack exists.
-            let pack_exists: Option<(String,)> = sqlx::query_as(
-                "SELECT pack FROM loom_predicate_packs WHERE pack = $1",
-            )
-            .bind(target_pack)
-            .fetch_optional(pool)
-            .await?;
+            let pack_exists: Option<(String,)> =
+                sqlx::query_as("SELECT pack FROM loom_predicate_packs WHERE pack = $1")
+                    .bind(target_pack)
+                    .fetch_optional(pool)
+                    .await?;
 
             if pack_exists.is_none() {
                 return Err(DashboardError::InvalidRequest(format!(
@@ -2210,6 +2269,73 @@ pub async fn handle_metrics_ingestion_distribution(
 }
 
 // ---------------------------------------------------------------------------
+// GET /dashboard/api/episodes/failed
+// ---------------------------------------------------------------------------
+
+/// List episodes that have exhausted retries and are parked in the `failed`
+/// state. Most recent failures first.
+pub async fn handle_failed_episodes(
+    State(state): State<AppState>,
+    Query(params): Query<PaginationParams>,
+) -> Result<Json<Vec<FailedEpisodeSummary>>, DashboardError> {
+    let limit = clamp_limit(params.limit);
+    let pool = &state.pools.online;
+
+    let episodes = crate::db::episodes::list_failed_episodes(pool, limit)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+
+    let response = episodes
+        .into_iter()
+        .map(|e| FailedEpisodeSummary {
+            id: e.id,
+            source: e.source,
+            namespace: e.namespace,
+            ingested_at: e.ingested_at,
+            processing_attempts: e.processing_attempts,
+            processing_last_attempt: e.processing_last_attempt,
+            processing_last_error: e.processing_last_error,
+        })
+        .collect();
+
+    Ok(Json(response))
+}
+
+// ---------------------------------------------------------------------------
+// POST /dashboard/api/episodes/{id}/requeue
+// ---------------------------------------------------------------------------
+
+/// Reset an episode's processing state so the worker picks it up on its
+/// next poll. Operator escape hatch for "I fixed the root cause of the
+/// failure, try extraction again."
+///
+/// Accepts any episode ID — not just failed ones — so an operator can also
+/// force-reprocess a `completed` episode after a schema change. Returns
+/// 404 if no episode with the given id exists.
+pub async fn handle_requeue_episode(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<RequeueEpisodeResponse>, DashboardError> {
+    let pool = &state.pools.online;
+
+    let episode = crate::db::episodes::requeue_episode(pool, id)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?
+        .ok_or(DashboardError::NotFound)?;
+
+    tracing::info!(
+        episode_id = %id,
+        "dashboard: episode requeued for processing"
+    );
+
+    Ok(Json(RequeueEpisodeResponse {
+        id: episode.id,
+        processing_status: episode.processing_status,
+        processing_attempts: episode.processing_attempts,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -2295,8 +2421,12 @@ mod tests {
     #[test]
     fn dashboard_error_display_messages() {
         assert_eq!(DashboardError::NotFound.to_string(), "not found");
-        assert!(DashboardError::Database("x".into()).to_string().contains("database error"));
-        assert!(DashboardError::InvalidRequest("y".into()).to_string().contains("invalid request"));
+        assert!(DashboardError::Database("x".into())
+            .to_string()
+            .contains("database error"));
+        assert!(DashboardError::InvalidRequest("y".into())
+            .to_string()
+            .contains("invalid request"));
     }
 
     // -- ResolveConflictRequest validation ----------------------------------
@@ -2341,7 +2471,8 @@ mod tests {
 
     #[test]
     fn resolve_conflict_request_deserializes_merged() {
-        let json = r#"{"resolution":"merged","merged_into":"00000000-0000-0000-0000-000000000001"}"#;
+        let json =
+            r#"{"resolution":"merged","merged_into":"00000000-0000-0000-0000-000000000001"}"#;
         let req: ResolveConflictRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.resolution, "merged");
         assert!(req.merged_into.is_some());

@@ -40,7 +40,7 @@ use loom_engine::{
     db::pool::DbPools,
     llm::client::LlmClient,
     pipeline::online::{
-        compile::{self, CompilationInput, HotTierItem, HotTierPayload, HotFact, HotEntity},
+        compile::{self, CompilationInput, HotEntity, HotFact, HotTierItem, HotTierPayload},
         namespace::{validate_namespace, NamespaceConfig, DEFAULT_NAMESPACE},
         rank,
         retrieve::{
@@ -68,8 +68,7 @@ const TEST_BEARER_TOKEN: &str = "integration-test-token";
 
 /// Build a test AppConfig.
 fn test_config() -> AppConfig {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
 
     AppConfig {
         database_url: db_url.clone(),
@@ -83,6 +82,8 @@ fn test_config() -> AppConfig {
         pool_idle_timeout_secs: 300,
         statement_timeout_secs: 30,
         hot_tier_cache_ttl_secs: 60,
+        episode_max_attempts: 5,
+        episode_backoff_base_secs: 30,
         loom_host: "0.0.0.0".to_string(),
         loom_port: 8080,
         loom_bearer_token: TEST_BEARER_TOKEN.to_string(),
@@ -129,10 +130,7 @@ async fn build_full_test_app() -> Router {
     // REST routes
     let rest_routes = Router::new()
         .route("/api/learn", post(rest::handle_api_learn))
-        .route(
-            "/api/webhooks/github",
-            post(rest::handle_github_webhook),
-        )
+        .route("/api/webhooks/github", post(rest::handle_github_webhook))
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
             require_bearer_token,
@@ -162,10 +160,7 @@ async fn build_full_test_app() -> Router {
             "/dashboard/api/compilations/{id}",
             get(dashboard::handle_compilation_detail),
         )
-        .route(
-            "/dashboard/api/entities",
-            get(dashboard::handle_entities),
-        )
+        .route("/dashboard/api/entities", get(dashboard::handle_entities))
         .route(
             "/dashboard/api/entities/{id}",
             get(dashboard::handle_entity_detail),
@@ -175,10 +170,7 @@ async fn build_full_test_app() -> Router {
             get(dashboard::handle_entity_graph),
         )
         .route("/dashboard/api/facts", get(dashboard::handle_facts))
-        .route(
-            "/dashboard/api/conflicts",
-            get(dashboard::handle_conflicts),
-        )
+        .route("/dashboard/api/conflicts", get(dashboard::handle_conflicts))
         .route(
             "/dashboard/api/predicates/candidates",
             get(dashboard::handle_predicate_candidates),
@@ -238,10 +230,7 @@ async fn get_authed(app: Router, uri: &str) -> axum::response::Response {
         Request::builder()
             .method("GET")
             .uri(uri)
-            .header(
-                header::AUTHORIZATION,
-                format!("Bearer {TEST_BEARER_TOKEN}"),
-            )
+            .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
             .body(Body::empty())
             .unwrap(),
     )
@@ -250,19 +239,12 @@ async fn get_authed(app: Router, uri: &str) -> axum::response::Response {
 }
 
 /// Send a POST request with JSON body and the test bearer token.
-async fn post_authed(
-    app: Router,
-    uri: &str,
-    body: serde_json::Value,
-) -> axum::response::Response {
+async fn post_authed(app: Router, uri: &str, body: serde_json::Value) -> axum::response::Response {
     app.oneshot(
         Request::builder()
             .method("POST")
             .uri(uri)
-            .header(
-                header::AUTHORIZATION,
-                format!("Bearer {TEST_BEARER_TOKEN}"),
-            )
+            .header(header::AUTHORIZATION, format!("Bearer {TEST_BEARER_TOKEN}"))
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(serde_json::to_vec(&body).unwrap()))
             .unwrap(),
@@ -337,7 +319,6 @@ fn build_procedure_candidate(score: f64, namespace: &str) -> RetrievalCandidate 
     }
 }
 
-
 // ===========================================================================
 // 1. Complete Offline Pipeline Test (Pure Logic)
 // ===========================================================================
@@ -405,8 +386,16 @@ mod offline_pipeline {
         use loom_engine::types::entity::EntityType;
 
         let valid_types = [
-            "person", "organization", "project", "service", "technology",
-            "pattern", "environment", "document", "metric", "decision",
+            "person",
+            "organization",
+            "project",
+            "service",
+            "technology",
+            "pattern",
+            "environment",
+            "document",
+            "metric",
+            "decision",
         ];
 
         for t in &valid_types {
@@ -426,8 +415,13 @@ mod offline_pipeline {
         use loom_engine::types::fact::EvidenceStatus;
 
         let statuses = [
-            "extracted", "observed", "inferred", "user_asserted",
-            "promoted", "deprecated", "superseded",
+            "extracted",
+            "observed",
+            "inferred",
+            "user_asserted",
+            "promoted",
+            "deprecated",
+            "superseded",
         ];
 
         for s in &statuses {
@@ -493,8 +487,7 @@ mod online_pipeline {
             let json = serde_json::to_value(&result).unwrap();
             let primary_str = json["primary_class"].as_str().unwrap();
             assert!(
-                ["debug", "architecture", "compliance", "writing", "chat"]
-                    .contains(&primary_str),
+                ["debug", "architecture", "compliance", "writing", "chat"].contains(&primary_str),
                 "invalid task class: {}",
                 primary_str
             );
@@ -547,7 +540,11 @@ mod online_pipeline {
 
                 // No duplicates.
                 let unique: HashSet<&RetrievalProfile> = merged.iter().collect();
-                assert_eq!(merged.len(), unique.len(), "merged profiles have duplicates");
+                assert_eq!(
+                    merged.len(),
+                    unique.len(),
+                    "merged profiles have duplicates"
+                );
             }
         }
     }
@@ -742,7 +739,6 @@ mod online_pipeline {
     }
 }
 
-
 // ===========================================================================
 // 3. loom_recall Test (Pure Logic)
 // ===========================================================================
@@ -889,9 +885,7 @@ mod dashboard_api {
         let json = body_json(resp).await;
 
         let packs = json.as_array().unwrap();
-        let has_core = packs
-            .iter()
-            .any(|p| p["pack"].as_str() == Some("core"));
+        let has_core = packs.iter().any(|p| p["pack"].as_str() == Some("core"));
         assert!(has_core, "predicate packs must include 'core'");
     }
 
@@ -1011,10 +1005,7 @@ mod dashboard_spa {
         let pkg: serde_json::Value = serde_json::from_str(&pkg_json).unwrap();
         let deps = pkg.get("dependencies").expect("must have dependencies");
         assert!(deps.get("react").is_some(), "must depend on react");
-        assert!(
-            deps.get("react-dom").is_some(),
-            "must depend on react-dom"
-        );
+        assert!(deps.get("react-dom").is_some(), "must depend on react-dom");
         assert!(
             deps.get("react-router-dom").is_some(),
             "must depend on react-router-dom"
@@ -1029,7 +1020,6 @@ mod dashboard_spa {
         assert!(exists, "loom-dashboard/vite.config.ts must exist");
     }
 }
-
 
 // ===========================================================================
 // 6. Namespace Isolation Verification
@@ -1107,7 +1097,10 @@ mod namespace_isolation {
             _ => panic!("expected fact"),
         };
 
-        assert_ne!(ns_a, ns_b, "candidates from different namespaces must be distinguishable");
+        assert_ne!(
+            ns_a, ns_b,
+            "candidates from different namespaces must be distinguishable"
+        );
     }
 
     /// Compilation is scoped to a single namespace.
@@ -1133,7 +1126,7 @@ mod namespace_isolation {
     /// MCP requests require non-empty namespace.
     #[test]
     fn mcp_requests_require_namespace() {
-        use loom_engine::types::mcp::{LearnRequest, ThinkRequest, RecallRequest};
+        use loom_engine::types::mcp::{LearnRequest, RecallRequest, ThinkRequest};
 
         // LearnRequest with empty namespace should be caught by validation.
         let learn = LearnRequest {
@@ -1350,7 +1343,6 @@ mod predicate_pack_system {
     }
 }
 
-
 // ===========================================================================
 // 9. Extraction Metrics
 // ===========================================================================
@@ -1467,6 +1459,8 @@ mod connection_pool_separation {
             pool_idle_timeout_secs: 300,
             statement_timeout_secs: 30,
             hot_tier_cache_ttl_secs: 60,
+            episode_max_attempts: 5,
+            episode_backoff_base_secs: 30,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -1533,6 +1527,8 @@ mod connection_pool_separation {
             pool_idle_timeout_secs: 300,
             statement_timeout_secs: 30,
             hot_tier_cache_ttl_secs: 60,
+            episode_max_attempts: 5,
+            episode_backoff_base_secs: 30,
             loom_host: "0.0.0.0".to_string(),
             loom_port: 8080,
             loom_bearer_token: "test".to_string(),
@@ -1658,10 +1654,7 @@ mod docker_compose_verification {
             .or_else(|_| std::fs::read_to_string("docker-compose.yml"))
             .expect("docker-compose.yml must exist");
 
-        assert!(
-            content.contains("caddy:"),
-            "caddy service must be defined"
-        );
+        assert!(content.contains("caddy:"), "caddy service must be defined");
         assert!(
             content.contains("Caddyfile"),
             "caddy service must mount Caddyfile"
@@ -1735,8 +1728,8 @@ mod docker_compose_verification {
     /// Caddyfile exists for reverse proxy configuration.
     #[test]
     fn caddyfile_exists() {
-        let exists = std::fs::metadata("../Caddyfile").is_ok()
-            || std::fs::metadata("Caddyfile").is_ok();
+        let exists =
+            std::fs::metadata("../Caddyfile").is_ok() || std::fs::metadata("Caddyfile").is_ok();
         assert!(exists, "Caddyfile must exist");
     }
 }
