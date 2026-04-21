@@ -45,12 +45,17 @@ REQUIRED_FIELDS = {
 # Per-episode byte cap. Long Claude Code sessions (multi-hour coding
 # work) can easily produce 3-5 MB of JSONL per file, which blows past
 # both the embedding model context window (nomic-embed-text: 8192
-# tokens ~= 32 KiB) and the extractor's practical window. The parser
-# splits each session into chunks at record boundaries, capping each
-# chunk at this many bytes. 24 KiB leaves comfortable headroom under
-# nomic-embed-text and still fits extractor prompts for gemma4:e4b
-# or gemma4:26b without truncation.
-MAX_CHUNK_BYTES = 24 * 1024
+# tokens) and the extractor's practical window. The parser splits each
+# session into chunks at record boundaries, capping each chunk at this
+# many bytes.
+#
+# Why 12 KiB, not the nominal ~32 KiB for an 8192-token window: code
+# tokenizes much denser than English prose (often 1-2 chars/token
+# versus ~4). Session JSONL is code- and tool-output-heavy, and a
+# chunk that looks fine at 24 KiB can blow 10K+ tokens once the
+# tokenizer sees it. 12 KiB keeps the worst-case chunk under 8K
+# tokens even on code-dense content.
+MAX_CHUNK_BYTES = 12 * 1024
 
 
 def iter_session_files(session_dir: Path) -> Iterator[Path]:
