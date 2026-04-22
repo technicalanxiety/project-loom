@@ -30,7 +30,7 @@ context packages for LLM consumption via MCP, REST, and a dashboard UI.
 ## Two Pipelines (Strictly Separated)
 
 - **Online** (latency-sensitive): classify → namespace → retrieve → weight → rank → compile → audit
-- **Offline** (async, never blocks queries): ingest → dedup → extract entities → resolve → extract facts → supersede → state → procedures → snapshot
+- **Offline** (async, never blocks queries): ingest → dedup → extract entities → resolve → extract facts → supersede → state → procedures → snapshot. Each episode moves through a `pending → processing → completed | failed` state machine; the worker applies exponential backoff between retries and parks episodes in `failed` after `EPISODE_MAX_ATTEMPTS` so poison-pill inputs can't generate infinite LLM load. See ADR 007.
 
 ## Local Development
 

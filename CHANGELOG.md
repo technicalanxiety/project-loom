@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Episode processing state machine with bounded retries (ADR 007)
+
+- Migration 016 adds `processing_status` (`pending` / `processing` /
+  `completed` / `failed`), `processing_attempts`,
+  `processing_last_attempt`, `processing_last_error` to `loom_episodes`.
+  Partial indexes on `processing_status='pending'` (for the poll path)
+  and `processing_status='failed'` (for the dashboard).
+- Worker atomically claims rows via conditional UPDATE before running
+  the pipeline — safe for multiple replicas even though deployment
+  currently runs one.
+- Exponential backoff between retries: delay for attempt N is
+  `EPISODE_BACKOFF_BASE_SECS * 2^N`. After `EPISODE_MAX_ATTEMPTS`
+  (default 5, base 30s) the episode transitions to `failed` and stops
+  consuming worker cycles. Fixes the poison-pill retry loop where a
+  deterministically-unprocessable episode (e.g. content exceeding
+  nomic-embed-text's context window) generated infinite Ollama load.
+- New env vars: `EPISODE_MAX_ATTEMPTS`, `EPISODE_BACKOFF_BASE_SECS`.
+- New dashboard endpoints: `GET /dashboard/api/episodes/failed`
+  (operator triage queue with per-episode error context),
+  `POST /dashboard/api/episodes/{id}/requeue` (reset to `pending`,
+  clear attempts — used after fixing the root cause).
+- `PipelineHealthResponse` gains `failed_episode_count`. `queue_depth`
+  is now pending-only — failed episodes are counted separately so the
+  dashboard can distinguish "waiting on worker" from "waiting on
+  operator."
+- Truncates persisted error messages at 2 KiB so long Ollama 400
+  bodies don't balloon the failed-episodes table.
+- ADR 007 documents the design rationale, alternatives, and operator
+  workflow.
+
 #### Initial build (scaffolding through task 25 completion)
 
 - PostgreSQL schema: episodes, entities, facts, predicates, procedures, resolution conflicts,

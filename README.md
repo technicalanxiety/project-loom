@@ -151,7 +151,7 @@ graph TB
 The online and offline pipelines share PostgreSQL but use **separate connection pools** so offline processing never starves query serving:
 
 - **Online pipeline** (loom_think): classify → retrieve → weight → rank → compile. Target < 500ms p95.
-- **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately.
+- **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately. Each episode moves through a `pending → processing → completed | failed` state machine with exponential backoff on failure (see [ADR-007](docs/adr/007-episode-processing-retry-backoff.md)); permanently-unprocessable episodes surface on the dashboard for operator triage rather than retrying forever.
 
 ## Supported Clients
 
@@ -374,6 +374,15 @@ All configuration is via environment variables. Copy `.env.example` to `.env` an
 | `LOOM_PORT` | Server port | `8080` |
 | `RUST_LOG` | Log level filter | `loom_engine=info,tower_http=debug` |
 
+### Episode Processing Worker
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `EPISODE_MAX_ATTEMPTS` | Max retry attempts before an episode is marked `failed` | `5` |
+| `EPISODE_BACKOFF_BASE_SECS` | Base backoff in seconds; actual delay is `base * 2^attempts` | `30` |
+
+After `EPISODE_MAX_ATTEMPTS` failures the episode transitions to `processing_status='failed'` and the worker stops retrying. The dashboard surfaces these at `/dashboard/api/episodes/failed` for triage; once the root cause is fixed, `POST /dashboard/api/episodes/{id}/requeue` resets the counter. See [ADR-007](docs/adr/007-episode-processing-retry-backoff.md).
+
 ### Test Database
 
 | Variable | Description | Default |
@@ -591,7 +600,7 @@ External clients calling `/mcp/*` or `/api/*` still carry their own bearer token
 
 | View | Description |
 |------|-------------|
-| **Pipeline Health** | Episode counts by source/namespace, entity counts by type, queue depth, model config |
+| **Pipeline Health** | Episode counts by source/namespace, entity counts by type, pending queue depth, failed-episode count, model config |
 | **Compilation Traces** | Paginated loom_think history with drill-down to per-candidate score breakdowns |
 | **Knowledge Graph Explorer** | Entity search, detail view, visual 1-2 hop neighborhood graph |
 | **Entity Conflict Queue** | Unresolved resolution conflicts. Actions: merge, keep separate, split |
@@ -630,6 +639,8 @@ All dashboard endpoints are under `/dashboard/api/`. Requests flow through Caddy
 | GET | `/dashboard/api/metrics/ingestion-distribution` | Per-namespace Mode 1/2/3 counts + seed-only warning list |
 | POST | `/dashboard/api/conflicts/{id}/resolve` | Resolve entity conflict |
 | POST | `/dashboard/api/predicates/candidates/{id}/resolve` | Resolve predicate candidate |
+| GET | `/dashboard/api/episodes/failed` | List episodes that exhausted retries (operator triage queue) |
+| POST | `/dashboard/api/episodes/{id}/requeue` | Reset an episode's processing state to `pending` (after fixing the root cause) |
 
 ---
 

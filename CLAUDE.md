@@ -60,6 +60,32 @@ The MCP handler ignores whatever `ingestion_mode` a client sends and
 sets it to `live_mcp_capture`. Clients cannot forge the mode through
 this transport. Do not add an override path.
 
+### Episode processing state machine
+
+Every episode carries a `processing_status` that moves through:
+`pending` → `processing` → (`completed` | `failed`). The legacy
+`processed BOOLEAN` column is kept in sync with `completed` for read-side
+compatibility but is no longer authoritative — new code must consult
+`processing_status`.
+
+The worker:
+1. Polls `pending` rows whose `processing_last_attempt` is NULL or older
+   than `EPISODE_BACKOFF_BASE_SECS * 2^processing_attempts` seconds.
+2. Atomically claims each row (pending → processing, increment attempts,
+   stamp `last_attempt = NOW()`) via a conditional UPDATE, so two
+   workers cannot both pick up the same episode.
+3. On success: status → `completed`, `last_error` cleared.
+4. On failure: if `processing_attempts >= EPISODE_MAX_ATTEMPTS` (default
+   5), status → `failed` and retries stop. Otherwise status → `pending`
+   and the backoff predicate excludes the row until its window elapses.
+
+Do not add states, short-circuit the backoff, or retry `failed` rows
+without going through `requeue_episode` (which resets the counter). The
+whole point is to bound external LLM load for deterministically-bad
+episodes — a poison pill (e.g. content too large for nomic-embed-text's
+context window) must eventually stop consuming cycles. See
+[ADR-007](docs/adr/007-episode-processing-retry-backoff.md).
+
 ## Coding conventions for this repo
 
 - **Rust**: stable, tokio + axum 0.8 + sqlx 0.8. The `ring` crypto
@@ -103,7 +129,7 @@ burned once by mocked tests passing while a prod migration was broken.
 | Thing | Location |
 |-------|----------|
 | Engine source | `loom-engine/src/` |
-| DB migrations | `loom-engine/migrations/` (001–013+) |
+| DB migrations | `loom-engine/migrations/` (001–016+) |
 | Dashboard SPA | `loom-dashboard/src/` |
 | Per-client integration guides | `docs/clients/` |
 | Architecture Decision Records | `docs/adr/` |
