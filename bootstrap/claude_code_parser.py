@@ -27,7 +27,7 @@ import urllib.error
 from loom_http import build_ssl_context
 from schema_assertions import SchemaAssertionError, assert_schema
 
-PARSER_VERSION = "claude_code_parser@0.3.0"
+PARSER_VERSION = "claude_code_parser@0.4.0"
 PARSER_SOURCE_SCHEMA = "claude_code_jsonl_v2"
 
 # Pinned schema. Each session file is a newline-delimited sequence of event
@@ -49,13 +49,17 @@ REQUIRED_FIELDS = {
 # session into chunks at record boundaries, capping each chunk at this
 # many bytes.
 #
-# Why 12 KiB, not the nominal ~32 KiB for an 8192-token window: code
-# tokenizes much denser than English prose (often 1-2 chars/token
-# versus ~4). Session JSONL is code- and tool-output-heavy, and a
-# chunk that looks fine at 24 KiB can blow 10K+ tokens once the
-# tokenizer sees it. 12 KiB keeps the worst-case chunk under 8K
-# tokens even on code-dense content.
-MAX_CHUNK_BYTES = 12 * 1024
+# Why 4 KiB, not the nominal ~32 KiB for an 8192-token window: Claude
+# Code's JSONL is dominated by assistant tool_use records containing
+# escaped code diffs, tool-output blobs, and long JSON metadata. That
+# content tokenizes at roughly 1 char/token (sometimes worse) because
+# BPE tokenizers don't compress escaped JSON or base64 well. Observed
+# empirically: 3.2 KiB chunks embed cleanly; 5.9 KiB+ chunks hit the
+# 8192-token ceiling and return HTTP 400 "input length exceeds the
+# context length". 4 KiB is the conservative floor that leaves room
+# for the extraction prompt to sit alongside the content in gemma4:e4b's
+# 8192-token window on a per-episode basis.
+MAX_CHUNK_BYTES = 4 * 1024
 
 
 def iter_session_files(session_dir: Path) -> Iterator[Path]:
