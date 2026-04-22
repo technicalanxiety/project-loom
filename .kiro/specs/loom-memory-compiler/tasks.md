@@ -1233,7 +1233,8 @@ DEFAULT (no migration 016 needed).
 - All Rust code uses compile-time checked SQL queries via sqlx
 - All LLM response parsing uses strict serde deserialization
 - Online and offline pipelines use separate sqlx::PgPool instances
-- Docker deployment includes 5 containers: loom-engine, loom-dashboard, postgres, ollama, caddy
+- Docker deployment includes 4 always-running containers (loom-engine, loom-dashboard build, postgres, caddy) plus an opt-in Ollama container gated behind the `with-docker-ollama` Compose profile. Native Ollama on the Docker host via `host.docker.internal:11434` is the default — required on Apple Silicon (no Metal passthrough in Docker) and preferred anywhere GPU acceleration matters. See ADR-002 amendment.
+- MCP surface is dual: `POST /mcp` (JSON-RPC 2.0 wire protocol, what real MCP clients hit) plus per-tool REST endpoints `POST /mcp/loom_*` (direct curl / integration tests). See ADR-008.
 - Embeddings are 768 dimensions via nomic-embed-text (not 1536)
 - Ranking weights: relevance 0.40, recency 0.25, stability 0.20, provenance 0.15
 - Provenance coefficient lookup (per ADR 004): live_mcp_capture=1.0, user_authored_seed=0.8, vendor_import=0.6

@@ -9,6 +9,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### MCP wire protocol at `POST /mcp` (ADR 008)
+
+- New JSON-RPC 2.0 dispatcher at `POST /mcp` speaking the MCP wire
+  protocol every real MCP client expects. Handles `initialize`,
+  `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
+  Previously Loom advertised itself as an MCP server but only
+  implemented per-tool REST endpoints under `/mcp/`, which real
+  clients (Claude Desktop via `mcp-remote`, ChatGPT Developer Mode,
+  GitHub Copilot Agent mode, M365 Copilot declarative agents, Claude
+  Code) cannot connect to. This is the unblocker for every client in
+  `docs/clients/`.
+- `tools/list` advertises the three Loom tools with full JSON Schema
+  input schemas. The `loom_learn` description carries the
+  verbatim-content invariant (ADR 005) so MCP clients surface it to
+  the model at the point of tool choice — a third line of defense
+  alongside the per-client discipline templates and DB-level
+  enforcement.
+- The per-tool REST endpoints (`POST /mcp/loom_learn` etc.) remain
+  mounted for direct curl testing and integration tests. Both
+  surfaces share handler code so validation, dedup, and the
+  `ingestion_mode = live_mcp_capture` hardcoding apply regardless of
+  transport.
+- Caddyfile matcher updated from `handle /mcp/*` (which does NOT
+  match bare `/mcp`) to a named matcher covering both paths.
+- 14 unit tests + 13 integration tests in `tests/mcp_rpc.rs`
+  exercising the dispatcher end-to-end through the real axum router.
+- ADR 008 documents the method surface, alternatives considered
+  (rmcp crate, stdio-only shim, SSE fallback, dropping the REST
+  endpoints), and the protocol-version negotiation strategy.
+
+#### Multi-client integration (five first-class clients)
+
+- `docs/clients/` folder with one guide per supported client —
+  [claude-code.md](docs/clients/claude-code.md),
+  [claude-desktop.md](docs/clients/claude-desktop.md),
+  [chatgpt-desktop.md](docs/clients/chatgpt-desktop.md),
+  [github-copilot.md](docs/clients/github-copilot.md),
+  [m365-copilot.md](docs/clients/m365-copilot.md) — plus an index
+  README. Each guide covers MCP registration, discipline template,
+  vendor-import path (where an export exists), and known gaps. Equal
+  billing across all five; there is no "primary" target.
+- Discipline templates under `templates/` for ChatGPT Developer Mode
+  custom instructions, GitHub Copilot `.github/copilot-instructions.md`,
+  M365 Copilot declarative agent manifest + instructions, and an
+  updated Claude Desktop config using the `mcp-remote` stdio bridge.
+- Bootstrap parsers under `bootstrap/` for Claude.ai / Claude Desktop
+  account export (`claude_ai_export_v2`), ChatGPT Data Controls
+  export (`chatgpt_export_v1`), and M365 Copilot Purview audit
+  export (`m365_copilot_audit_v1`). Plus a stub for GitHub Copilot
+  Chat that exits non-zero pointing at the live-capture path (GitHub
+  does not publish a conversation export at time of writing).
+- Top-level `CLAUDE.md` slimmed to project-context-for-Claude-Code
+  sessions; the Claude Code MCP integration details moved to
+  `docs/clients/claude-code.md`.
+
+#### Background workers actually start
+
+- `start_processing_loop` (offline extraction) and `start_scheduler`
+  (daily/weekly periodic jobs) were defined in `worker/processor.rs`
+  and `worker/scheduler.rs` but never called from `main()`. Wired
+  both into the runtime alongside `axum::serve`, with graceful
+  shutdown on Ctrl-C via a shared `CancellationToken`. Before this
+  fix, episodes landed in Postgres with `processed=false` forever —
+  the pipeline claims of "async extraction runs in the background"
+  were true in intent but unimplemented in practice.
+
 #### Episode processing state machine with bounded retries (ADR 007)
 
 - Migration 016 adds `processing_status` (`pending` / `processing` /
@@ -94,6 +160,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewritten to reflect the "no PRs / no issues / no support" stance
 
 ### Changed
+
+#### Native Ollama is now the default (ADR 002 amendment)
+
+- `.env.example` default `OLLAMA_URL=http://host.docker.internal:11434`
+  (was `http://ollama:11434`). The engine now talks to a native
+  Ollama on the Docker host by default. This recovers Metal / MPS
+  acceleration on Apple Silicon (Docker cannot pass it through) and
+  CUDA on Linux hosts without Docker GPU setup. Required for
+  practical use on 16 GB M-series Macs where Docker Ollama was
+  CPU-only and OOM'd on even the classifier model.
+- `docker-compose.yml` Ollama service gated behind the
+  `with-docker-ollama` Compose profile — invoked with
+  `docker compose --profile with-docker-ollama up -d` for Linux +
+  CUDA hosts that prefer the containerized path.
+- `loom-engine` no longer declares `depends_on: ollama`. The LLM
+  client already has retry + Azure OpenAI fallback, and
+  `/api/health` reports Ollama as `degraded` rather than blocking
+  engine startup.
+- `EXTRACTION_MODEL` default changed to `gemma4:e4b` for 16 GB
+  hosts (same compact model handles classification and extraction,
+  lower quality but actually runs). Larger-memory hosts can set
+  `gemma4:26b` for the full MoE extractor.
+- ADR 002 amended with the native-vs-docker decision and Apple
+  Silicon rationale. README architecture diagram, Container
+  Overview table, and Quick Start "Pull Ollama models" section all
+  lead with the native path.
+
+#### Bootstrap ingestion plumbing
+
+- `DefaultBodyLimit` raised from axum's 2 MiB default to 64 MiB on
+  `/api/learn` and `/mcp` routes. Bootstrap parsers regularly POST
+  multi-MB session transcripts; the default was rejecting them with
+  413 before the handler saw the request.
+- `bootstrap/claude_code_parser.py` now chunks Claude Code JSONL
+  sessions at record boundaries with a 4 KiB per-episode cap (was:
+  one session = one episode). Raw Claude Code session files run
+  3-5 MB and blow past nomic-embed-text's 8192-token context
+  window; even at 12 KiB chunks, JSON-dense records (escaped code
+  diffs, tool-output blobs) tokenize at ~1 char/token and exceed
+  the window. 4 KiB is the empirical floor that keeps worst-case
+  chunks under 8 K tokens. Schema version stays
+  `claude_code_jsonl_v2`; parser version bumps to 0.3.0 then 0.4.0.
+- Parser envelope relaxed from requiring `type + timestamp` to
+  `type + sessionId`. Claude Code's actual JSONL has two record
+  types (`ai-title`, `last-prompt`) that never carry `timestamp` on
+  the envelope; the parser now walks until it finds the first
+  timestamp-bearing record per chunk for `occurred_at`.
+- New `LOOM_TLS_INSECURE` env var (via shared
+  `bootstrap/loom_http.py`) honored by all bootstrap parsers and
+  `cli/loom-seed.py` so local development against Caddy's
+  self-signed localhost cert works without disabling TLS
+  verification globally. Unset in production leaves urllib's
+  default (system trust store) verification in place.
+- Claude Desktop template switched to the `mcp-remote` stdio
+  bridge. Claude Desktop is stdio-only in shipped versions;
+  `mcp-remote` wraps the HTTP MCP endpoint into stdio. Template
+  documents the `NODE_TLS_REJECT_UNAUTHORIZED=0` env for localhost
+  self-signed certs and the `${LOOM_TOKEN}` interpolation gotcha
+  (Claude Desktop does not interpolate env vars in this file).
 
 #### Dependency refresh (Phase 1–3)
 

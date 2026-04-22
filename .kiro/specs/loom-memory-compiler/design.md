@@ -301,8 +301,9 @@ loom-engine/
 │   │       └── compile.rs      # Package compilation (XML structured + JSON compact)
 │   ├── api/
 │   │   ├── mod.rs
-│   │   ├── mcp.rs              # MCP JSON-RPC endpoint (loom_think, loom_learn, loom_recall)
-│   │   ├── rest.rs             # REST endpoint (/api/learn, /api/health)
+│   │   ├── mcp.rs              # Per-tool REST handlers for /mcp/loom_learn, /mcp/loom_think, /mcp/loom_recall
+│   │   ├── mcp_rpc.rs          # MCP JSON-RPC 2.0 dispatcher at POST /mcp (ADR-008)
+│   │   ├── rest.rs             # REST endpoint (/api/learn, /api/health, /api/webhooks/github)
 │   │   ├── dashboard.rs        # Dashboard API endpoints (read-only + 2 writes)
 │   │   └── auth.rs             # Bearer token middleware (tower)
 │   ├── worker/
@@ -318,7 +319,7 @@ loom-engine/
 │       ├── classification.rs   # ClassificationResult, TaskClass enum
 │       ├── compilation.rs      # CompiledPackage, OutputFormat
 │       ├── audit.rs            # AuditLogEntry struct
-│       └── mcp.rs              # MCP protocol types (JSON-RPC request/response)
+│       └── mcp.rs              # MCP tool request/response types (shared between REST and JSON-RPC surfaces)
 ├── migrations/
 │   ├── 001_episodes.sql
 │   ├── 002_entities.sql
@@ -345,7 +346,15 @@ loom-engine/
 
 ### MCP Interface
 
-The system exposes three Model Context Protocol endpoints for AI assistant integration, served via axum on the loom-engine binary:
+The system exposes three Model Context Protocol tools — `loom_learn`, `loom_think`, `loom_recall` — on two HTTP surfaces. Both surfaces are served by axum on the loom-engine binary and share the same tool-specific handler code, so validation, dedup, and ingestion-mode enforcement are bit-identical regardless of transport.
+
+**`POST /mcp` — MCP JSON-RPC 2.0 dispatcher.** This is what real MCP clients (Claude Desktop via `mcp-remote`, ChatGPT Developer Mode, GitHub Copilot Agent mode, M365 Copilot declarative agents, Claude Code) connect to after registering `https://<host>/mcp`. The dispatcher handles `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. See ADR-008 for method-by-method semantics and alternatives considered.
+
+**`POST /mcp/loom_learn`, `POST /mcp/loom_think`, `POST /mcp/loom_recall` — per-tool REST endpoints.** These predate the JSON-RPC dispatcher and remain mounted for direct-curl testing, integration tests, and callers that do not want to speak the MCP wire protocol. They are *not* what MCP clients use.
+
+Both surfaces hardcode `ingestion_mode = live_mcp_capture` on `loom_learn` calls at the server boundary (ADR-004); clients cannot override this through either transport.
+
+The three tools:
 
 **loom_learn(content, source, namespace, occurred_at, metadata, participants)**
 - Ingests a new episode into the system

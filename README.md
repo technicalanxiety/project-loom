@@ -91,7 +91,7 @@ graph TB
         DashUI[React SPA<br/>Pipeline Health · Graph Explorer<br/>Trace Viewer · Conflict Queue]
     end
 
-    subgraph "Ollama"
+    subgraph "Ollama (native by default, docker opt-in)"
         Models[gemma4:26b<br/>gemma4:e4b<br/>nomic-embed-text]
     end
 
@@ -143,7 +143,7 @@ graph TB
 | **loom-engine** | Rust binary on debian:bookworm-slim | MCP, REST, Dashboard API, offline pipeline, scheduled tasks |
 | **loom-dashboard** | Build-only (node:22 → busybox) | React bundle populated into `dashboard_dist` volume, container exits |
 | **postgres** | pgvector/pgvector:pg17 | Single data store with pgvector (pgAudit optional — image doesn't ship it) |
-| **ollama** | ollama/ollama:latest | Local LLM inference (zero cloud dependency) |
+| **ollama** *(opt-in)* | ollama/ollama:latest | Local LLM inference. Native on the Docker host is the default (required on Apple Silicon — Docker cannot pass through Metal). Dockered Ollama lives behind the `with-docker-ollama` Compose profile for Linux + CUDA hosts. See [ADR-002](docs/adr/002-local-llm-inference.md). |
 | **caddy** | caddy:2-alpine | TLS termination, reverse proxy, static file serving, bearer-token injection for dashboard API |
 
 ### Pipeline Separation
@@ -393,13 +393,78 @@ After `EPISODE_MAX_ATTEMPTS` failures the episode transitions to `processing_sta
 
 ## MCP Endpoints
 
-All MCP endpoints require `Authorization: Bearer <token>` header.
+Loom exposes its three tools (`loom_learn`, `loom_think`, `loom_recall`)
+on two HTTP surfaces. Both require `Authorization: Bearer <token>`.
+
+- **`POST /mcp`** — MCP JSON-RPC 2.0 dispatcher. This is what real MCP
+  clients hit after registering `https://<your-loom>/mcp` as an MCP
+  server (Claude Desktop via `mcp-remote`, ChatGPT Developer Mode apps,
+  GitHub Copilot Agent mode, M365 Copilot declarative agents, Claude
+  Code `claude mcp add`). The dispatcher speaks the methods every MCP
+  client expects: `initialize`, `notifications/initialized`, `ping`,
+  `tools/list`, `tools/call`. See [ADR-008](docs/adr/008-mcp-wire-protocol.md)
+  for the decision rationale and the set of methods supported.
+
+- **`POST /mcp/loom_learn`, `POST /mcp/loom_think`, `POST /mcp/loom_recall`** —
+  per-tool REST endpoints. These predate the JSON-RPC dispatcher and
+  remain mounted for direct curl testing, integration tests, and
+  callers that don't want to speak the MCP wire protocol. They are
+  *not* what MCP clients connect to; use them for scripts, smoke tests,
+  and one-off requests.
+
+The two surfaces share the same handler code — whether a call arrives
+via JSON-RPC `tools/call` or a direct `POST /mcp/loom_*`, it runs the
+same validation, the same dedup logic, and the same pipeline. The MCP
+server hardcodes `ingestion_mode = live_mcp_capture` at both entry
+points; clients cannot override it through either transport.
+
+### JSON-RPC dispatcher request shape
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "loom_learn",
+    "arguments": {
+      "content": "Discussed migrating auth service to OAuth2...",
+      "source": "claude-desktop",
+      "namespace": "my-project"
+    }
+  }
+}
+```
+
+Responses follow the MCP `tools/call` convention:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      { "type": "text", "text": "{\n  \"episode_id\": \"...\",\n  \"status\": \"queued\"\n}" }
+    ]
+  }
+}
+```
+
+On tool-level failure the result carries `"isError": true` plus a text
+block describing the failure. Transport-level errors (malformed
+envelope, unknown method) surface as standard JSON-RPC error objects
+with the canonical `-32600`/`-32601`/`-32602` codes.
+
+The tool argument schemas below describe the shape that goes inside
+`params.arguments` for JSON-RPC callers and the full body for direct
+REST callers.
 
 ### loom_learn — Ingest an Episode
 
 Stores an episode and queues it for async extraction. Returns immediately.
 
-**Endpoint:** `POST /mcp/loom_learn`
+**Endpoints:** `POST /mcp/loom_learn` (REST) or `POST /mcp` with
+`method: "tools/call"` + `params.name: "loom_learn"` (JSON-RPC).
 
 **Request:**
 
@@ -447,7 +512,8 @@ Stores an episode and queues it for async extraction. Returns immediately.
 
 Runs the full online pipeline: classify intent → select retrieval profiles → execute in parallel → apply weights → rank → compile package.
 
-**Endpoint:** `POST /mcp/loom_think`
+**Endpoints:** `POST /mcp/loom_think` (REST) or `POST /mcp` with
+`method: "tools/call"` + `params.name: "loom_think"` (JSON-RPC).
 
 **Request:**
 
@@ -497,7 +563,8 @@ Runs the full online pipeline: classify intent → select retrieval profiles →
 
 Bypasses classification and retrieval profiles. Returns raw facts for named entities.
 
-**Endpoint:** `POST /mcp/loom_recall`
+**Endpoints:** `POST /mcp/loom_recall` (REST) or `POST /mcp` with
+`method: "tools/call"` + `params.name: "loom_recall"` (JSON-RPC).
 
 **Request:**
 
@@ -800,7 +867,8 @@ project-loom/
 │   │   │       ├── rank.rs             # 4-dimension ranking
 │   │   │       └── compile.rs          # Context package compilation
 │   │   ├── api/
-│   │   │   ├── mcp.rs                  # MCP JSON-RPC handlers
+│   │   │   ├── mcp.rs                  # Per-tool REST handlers for /mcp/loom_*
+│   │   │   ├── mcp_rpc.rs              # MCP JSON-RPC 2.0 dispatcher at POST /mcp (ADR-008)
 │   │   │   ├── rest.rs                 # REST API + GitHub webhooks
 │   │   │   ├── dashboard.rs            # Dashboard API handlers
 │   │   │   └── auth.rs                 # Bearer token middleware
