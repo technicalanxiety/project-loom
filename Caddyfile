@@ -1,19 +1,18 @@
 # Caddyfile — Caddy reverse proxy for Project Loom
 #
-# Caddy automatically provisions and renews TLS certificates via ACME
-# when a real domain is used. For local development, the localhost
-# address below triggers Caddy's built-in CA (self-signed).
+# By default Caddy serves only localhost (self-signed cert via its local CA).
+# To also serve on a LAN IP (e.g. a headless Linux node), set LOOM_LAN_HOST
+# in .env to the host's LAN address (e.g. 192.168.1.50). Caddy will issue
+# an internal cert for that address automatically.
 #
-# To use a real domain in production, replace "localhost" with the FQDN
-# (e.g., loom.example.com) and Caddy handles Let's Encrypt automatically.
+#   LOOM_LAN_HOST=192.168.1.50   # set in .env; leave unset for localhost-only
 
 {
 	# Global options
-	# Uncomment the line below to use a custom ACME email for production TLS:
-	# email ops@example.com
 }
 
-localhost {
+localhost, {$LOOM_LAN_HOST:localhost} {
+	tls internal
 	# ── MCP endpoints → loom-engine ──────────────────────────
 	# External MCP clients (Claude Code, Claude Desktop, ChatGPT Desktop,
 	# GitHub Copilot, M365 Copilot, etc.) must supply their own

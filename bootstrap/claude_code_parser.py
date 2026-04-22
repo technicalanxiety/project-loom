@@ -42,6 +42,10 @@ REQUIRED_FIELDS = {
     "sessionId": str,
 }
 
+# Record types added in later Claude Code versions that carry no conversation
+# content and should be excluded from ingestion.
+_SKIP_TYPES = {"file-history-snapshot", "queue-operation"}
+
 # Per-episode byte cap. Long Claude Code sessions (multi-hour coding
 # work) can easily produce 3-5 MB of JSONL per file, which blows past
 # both the embedding model context window (nomic-embed-text: 8192
@@ -122,6 +126,8 @@ def iter_chunks(path: Path) -> Iterator[tuple[str, str, int]]:
             raise SchemaAssertionError(
                 f"{PARSER_SOURCE_SCHEMA}: {path}:{lineno} is not valid JSON: {exc}"
             ) from exc
+        if record.get("type") in _SKIP_TYPES:
+            continue
         assert_schema(record, REQUIRED_FIELDS, PARSER_SOURCE_SCHEMA)
 
         line_bytes = len(line.encode("utf-8")) + 1  # +1 for newline

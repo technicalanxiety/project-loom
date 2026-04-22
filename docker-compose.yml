@@ -78,6 +78,10 @@ services:
     # the host, the engine has no local container to wait for. The LLM
     # client has retry + Azure-fallback logic, and /api/health reports
     # Ollama status as degraded rather than failing startup.
+    # On Linux, host.docker.internal is not injected automatically.
+    # This maps it to the host gateway so the engine can reach native Ollama.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
