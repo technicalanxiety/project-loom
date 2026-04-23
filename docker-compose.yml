@@ -57,9 +57,8 @@ services:
 
   # ─── Loom Engine (Rust Binary) ─────────────────────────────
   loom-engine:
-    build:
-      context: ./loom-engine
-      dockerfile: Dockerfile
+    image: ghcr.io/technicalanxiety/project-loom/engine:latest
+    pull_policy: always
     env_file: .env
     environment:
       # Explicit Docker-internal hostnames override any .env values.
@@ -95,9 +94,8 @@ services:
 
   # ─── Loom Dashboard (React SPA) ───────────────────────────
   loom-dashboard:
-    build:
-      context: ./loom-dashboard
-      dockerfile: Dockerfile
+    image: ghcr.io/technicalanxiety/project-loom/dashboard:latest
+    pull_policy: always
     volumes:
       - dashboard_dist:/app/dist
     networks:

@@ -6,9 +6,10 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Output stage — static files only, used as a data volume source.
-# busybox provides a minimal filesystem so Docker can populate the
-# named volume from the image layer on first run.
+# Output stage — copies static files into the dashboard_dist named volume
+# on every startup so new image layers are always reflected after a pull.
+# Docker only auto-populates named volumes on first creation; the explicit
+# cp here ensures updates land even when the volume already exists.
 FROM busybox:1.37
-COPY --from=builder /app/dist /app/dist
-# No CMD — container exits immediately after volume population.
+COPY --from=builder /app/dist /build/dist
+CMD ["sh", "-c", "cp -r /build/dist/. /app/dist/"]
