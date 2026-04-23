@@ -9,6 +9,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Extraction-model guidance for iGPU / shared-memory hosts (ADR 009)
+
+- ADR 009 introduces a third `EXTRACTION_MODEL` tier for hosts whose
+  memory bandwidth — not capacity — is the bottleneck (AMD APUs,
+  ARM SoCs, CPU-only). `qwen2.5:14b` is the new recommended model for
+  that class: reliable structured-JSON output at ~30-60 s per episode
+  on a Beelink SER5-class Ryzen 5 / Vega iGPU / 32 GB DDR4. `gemma4:26b`
+  is retained for discrete-GPU hosts; `gemma4:e4b` remains the default
+  classifier everywhere and a last-resort extractor on very tight
+  hardware.
+- Benchmark table and hardware-tier framing documented in the ADR so
+  future hardware classes (Strix Halo, Snapdragon X, etc.) map onto
+  whichever tier their memory path resembles.
+
+#### GHCR image publishing on every push to main
+
+- New `.github/workflows/docker-publish.yml` builds `loom-engine` and
+  `loom-dashboard` images in parallel and pushes to
+  `ghcr.io/technicalanxiety/project-loom/{engine,dashboard}` with both
+  `:latest` and `:<sha>` tags on every push to `main`. Separate GHA
+  cache scopes per image keep incremental rebuilds fast.
+- `docker-compose.yml` switched to `pull_policy: always` on both images
+  so `docker compose up -d` always lands the newest main build. The
+  dashboard runs as a `busybox` copy-then-exit container that refreshes
+  the shared `dashboard_dist` named volume on every start — without
+  this, Docker only populates named volumes on first creation and
+  updates would be invisible.
+- Unblocks the remote dev node (Beelink SER5) from needing a local
+  Rust/npm toolchain to deploy.
+
+### Fixed
+
+#### LLM pipeline on memory-bandwidth-bound hardware
+
+- `LlmClient::REQUEST_TIMEOUT` bumped from 30 s to 300 s
+  ([loom-engine/src/llm/client.rs](loom-engine/src/llm/client.rs)).
+  The previous value silently failed every extraction request on iGPU
+  hosts because `gemma4:26b` takes several minutes per prompt there.
+  Embeddings always return in under a second, so the long timeout has
+  no practical cost on that path. Not configurable — a single constant
+  keeps the operating envelope honest. See ADR 009.
+- `generate_episode_embedding` now truncates content at 30,000
+  characters before sending to `nomic-embed-text`
+  ([loom-engine/src/llm/embeddings.rs:18](loom-engine/src/llm/embeddings.rs)).
+  `nomic-embed-text`'s context window is ~32 K characters; episodes
+  exceeding it previously became poison pills that consumed every
+  retry attempt. Paired with the retry/backoff state machine (ADR 007)
+  so genuinely unprocessable episodes still bound out, but normal
+  oversized Claude Code session transcripts no longer fail.
+- `WORKER_CONCURRENCY` env var (default 4, runtime-validated ≥1) lets
+  operators on iGPU hosts set `WORKER_CONCURRENCY=1` to serialize
+  inference. Parallel extraction on a bandwidth-bound iGPU thrashes
+  the shared memory bus and ends up *slower* than serial; one-in-flight
+  is the correct default for that hardware. Discrete-GPU hosts can
+  leave the default.
+
+#### Offline pipeline no longer clobbers `classification_model`
+
+- `UPDATE loom_episodes SET classification_model = $3` in
+  [loom-engine/src/db/episodes.rs](loom-engine/src/db/episodes.rs)
+  now uses `COALESCE(NULLIF($3, ''), classification_model)` so an
+  empty string preserves the existing value rather than overwriting
+  it. The offline extraction pipeline always passed `""` (classification
+  is an online-stage concern), which silently erased the classifier
+  lineage every time an episode was (re)processed. The dashboard's
+  "configured classification model" tile reads the most recent
+  non-null value, so after a bulk reprocessing run it went blank. One-
+  time backfill for affected deployments:
+  `UPDATE loom_episodes SET classification_model = '<configured value>'
+  WHERE classification_model = '' OR classification_model IS NULL`.
+
 #### MCP wire protocol at `POST /mcp` (ADR 008)
 
 - New JSON-RPC 2.0 dispatcher at `POST /mcp` speaking the MCP wire

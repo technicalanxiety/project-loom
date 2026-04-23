@@ -443,7 +443,7 @@ pub async fn update_extraction_metrics(
         r#"
         UPDATE loom_episodes
         SET extraction_model = $2,
-            classification_model = $3,
+            classification_model = COALESCE(NULLIF($3, ''), classification_model),
             extraction_metrics = $4
         WHERE id = $1
         RETURNING *
