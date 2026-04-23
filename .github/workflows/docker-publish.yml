@@ -7,6 +7,7 @@ on:
 env:
   ENGINE_IMAGE: ghcr.io/technicalanxiety/project-loom/engine
   DASHBOARD_IMAGE: ghcr.io/technicalanxiety/project-loom/dashboard
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-engine:
