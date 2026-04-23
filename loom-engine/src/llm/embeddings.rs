@@ -12,6 +12,11 @@ use crate::config::LlmConfig;
 /// Expected embedding dimension for nomic-embed-text.
 pub const EXPECTED_DIMENSION: usize = 768;
 
+/// nomic-embed-text context window: 8192 tokens. At ~4 chars/token this is
+/// ~32K chars; we truncate conservatively at 30K to stay well clear of it.
+/// Longer content is a deterministic poison pill — it will never embed.
+const EMBED_CHAR_LIMIT: usize = 30_000;
+
 // ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
@@ -93,8 +98,10 @@ pub async fn generate_entity_embedding(
 
 /// Generate a 768-dimension embedding for episode content.
 ///
-/// This is a convenience wrapper around [`generate_embedding`] that accepts
-/// the raw episode content string.
+/// Content longer than [`EMBED_CHAR_LIMIT`] characters is truncated before
+/// sending to the model. nomic-embed-text's 8192-token context window makes
+/// oversized episodes a deterministic failure — truncation lets them embed
+/// against their leading content rather than failing permanently.
 ///
 /// # Errors
 ///
@@ -105,13 +112,31 @@ pub async fn generate_episode_embedding(
     config: &LlmConfig,
     content: &str,
 ) -> Result<Vec<f32>, EmbeddingError> {
-    tracing::debug!(content_len = content.len(), "generating episode embedding");
-    generate_embedding(client, config, content).await
+    let truncated = truncate_for_embedding(content);
+    if truncated.len() < content.len() {
+        tracing::warn!(
+            original_chars = content.chars().count(),
+            truncated_chars = EMBED_CHAR_LIMIT,
+            "episode content exceeds embedding context window — truncating"
+        );
+    }
+    tracing::debug!(content_len = truncated.len(), "generating episode embedding");
+    generate_embedding(client, config, truncated).await
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Truncate `text` to at most [`EMBED_CHAR_LIMIT`] Unicode scalar values,
+/// always on a valid char boundary. Returns the original slice unchanged
+/// when it is already within the limit.
+fn truncate_for_embedding(text: &str) -> &str {
+    match text.char_indices().nth(EMBED_CHAR_LIMIT) {
+        Some((byte_idx, _)) => &text[..byte_idx],
+        None => text,
+    }
+}
 
 /// Validate that an embedding vector has exactly [`EXPECTED_DIMENSION`]
 /// elements.
@@ -339,6 +364,37 @@ mod tests {
         assert!(err.to_string().contains("LLM client error"));
     }
 
+    // -- truncate_for_embedding ---------------------------------------------
+
+    #[test]
+    fn truncate_short_text_unchanged() {
+        let text = "hello world";
+        assert_eq!(truncate_for_embedding(text), text);
+    }
+
+    #[test]
+    fn truncate_exactly_at_limit_unchanged() {
+        let text = "a".repeat(EMBED_CHAR_LIMIT);
+        assert_eq!(truncate_for_embedding(&text).len(), EMBED_CHAR_LIMIT);
+    }
+
+    #[test]
+    fn truncate_over_limit_clips_to_limit() {
+        let text = "a".repeat(EMBED_CHAR_LIMIT + 5_000);
+        let result = truncate_for_embedding(&text);
+        assert_eq!(result.chars().count(), EMBED_CHAR_LIMIT);
+    }
+
+    #[test]
+    fn truncate_multibyte_unicode_stays_on_char_boundary() {
+        // Each '字' is 3 UTF-8 bytes. Build a string slightly over the limit.
+        let text: String = std::iter::repeat('字').take(EMBED_CHAR_LIMIT + 10).collect();
+        let result = truncate_for_embedding(&text);
+        assert_eq!(result.chars().count(), EMBED_CHAR_LIMIT);
+        // Valid UTF-8 — chars() must not panic.
+        let _ = result.chars().count();
+    }
+
     // -- generate_embedding with various text inputs ------------------------
 
     #[tokio::test]
@@ -380,6 +436,29 @@ mod tests {
         let result = generate_embedding(&client, &config, &long_text).await;
 
         let vec = result.expect("should succeed with very long text");
+        assert_eq!(vec.len(), 768);
+    }
+
+    #[tokio::test]
+    async fn generate_episode_embedding_truncates_oversized_content() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/embeddings"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let (client, config) = test_config(&server.uri());
+        // Build a string well over the embedding context limit (simulates
+        // the 42K-character episodes that were poisoning the queue).
+        let oversized = "x".repeat(EMBED_CHAR_LIMIT + 15_000);
+        let result = generate_episode_embedding(&client, &config, &oversized).await;
+
+        let vec = result.expect("oversized episode must embed after truncation");
         assert_eq!(vec.len(), 768);
     }
 

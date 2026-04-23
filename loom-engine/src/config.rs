@@ -46,6 +46,9 @@ pub struct AppConfig {
     pub loom_port: u16,
     /// Bearer token for API authentication.
     pub loom_bearer_token: String,
+    /// Maximum concurrent episode processing tasks (default: 4). Set to 1
+    /// when running on an iGPU to avoid memory-bandwidth contention.
+    pub worker_concurrency: usize,
     /// LLM / embedding service configuration.
     pub llm: LlmConfig,
 }
@@ -146,6 +149,16 @@ impl AppConfig {
             ));
         }
 
+        let worker_concurrency = env::var("WORKER_CONCURRENCY")
+            .unwrap_or_else(|_| "4".to_string())
+            .parse::<usize>()
+            .map_err(|e| format!("WORKER_CONCURRENCY must be a valid usize: {e}"))?;
+        if worker_concurrency < 1 {
+            return Err(format!(
+                "WORKER_CONCURRENCY must be >= 1, got {worker_concurrency}"
+            ));
+        }
+
         let loom_host = env::var("LOOM_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let loom_port = env::var("LOOM_PORT")
             .unwrap_or_else(|_| "8080".to_string())
@@ -181,6 +194,7 @@ impl AppConfig {
             hot_tier_cache_ttl_secs,
             episode_max_attempts,
             episode_backoff_base_secs,
+            worker_concurrency,
             loom_host,
             loom_port,
             loom_bearer_token,

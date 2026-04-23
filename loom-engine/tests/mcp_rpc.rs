@@ -62,6 +62,7 @@ fn app_no_db() -> Router {
         hot_tier_cache_ttl_secs: 60,
         episode_max_attempts: 5,
         episode_backoff_base_secs: 30,
+        worker_concurrency: 1,
         loom_host: "0.0.0.0".into(),
         loom_port: 8080,
         loom_bearer_token: TEST_BEARER_TOKEN.into(),

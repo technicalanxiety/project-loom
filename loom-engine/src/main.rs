@@ -268,7 +268,7 @@ async fn main() {
         retry_policy,
         cancel_token.clone(),
         None, // default poll interval (5s)
-        None, // default concurrency (4)
+        Some(state.config.worker_concurrency),
     );
 
     let _scheduler_handles = scheduler::start_scheduler(
