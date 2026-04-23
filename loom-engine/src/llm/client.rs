@@ -59,8 +59,11 @@ const MAX_RETRIES: u32 = 3;
 /// Uses escalating backoff: 1s, 2s, 4s, 8s, 16s.
 const AZURE_RATE_LIMIT_MAX_RETRIES: u32 = 5;
 
-/// Per-request timeout.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Per-request timeout. 300s accommodates large-model inference (e.g.
+/// gemma4:26b) on iGPU hardware where a complex extraction prompt can
+/// take several minutes. Embeddings always return in under a second so
+/// the long timeout has no practical cost on that path.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Base delay for exponential backoff (doubles each retry).
 const BACKOFF_BASE: Duration = Duration::from_millis(500);
