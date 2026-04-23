@@ -123,3 +123,16 @@ it — the template reserves a `Namespace:` line for you to fill in.
 - **Vendor export cadence is user-driven.** You have to re-request the
   export when you want new conversations backfilled. The parser dedups
   by content hash, so re-ingesting the overlap is free.
+- **`source` field omission.** `loom_learn` requires three fields:
+  `content`, `namespace`, and `source`. Models that have not been given
+  explicit instructions to include `source` will omit it, and the server
+  will return a validation error. The Projects instructions template
+  (`templates/claude_desktop_projects_instructions.md`) now includes this
+  instruction — if you pasted an older version of the template, update it.
+- **Claude.ai web vs native Desktop serialization.** If you access a
+  Desktop Project through the Claude.ai browser interface rather than the
+  native app, MCP tool parameter serialization may behave differently.
+  Validate `loom_learn` calls on each surface you use: open the browser
+  interface, ask the model to save something, and confirm the server
+  receives all three required fields. `loom_think` and `loom_recall` (read
+  paths) are less sensitive to this because their schemas are simpler.

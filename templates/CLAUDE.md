@@ -20,6 +20,9 @@ quoted user text, quoted tool output, raw file contents the user pointed at.
 If the user says "save this" and points at content, the `content` argument
 must be the exact text they pointed at.
 
+Always include all three required fields: `content`, `namespace`, and
+`source`. Set `source` to `"claude-code"` for Claude Code sessions.
+
 The PostSession hook (`loom-capture.sh`) handles exhaustive session capture
 automatically. Your in-session `loom_learn` calls are only for the user's
 explicit "save this" moments — not for end-of-session summaries, not for

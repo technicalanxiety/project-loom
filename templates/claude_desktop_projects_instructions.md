@@ -26,5 +26,10 @@ or quoted verbatim from source material I provided.
 Do not call `loom_learn` for casual exchanges, clarifications, small talk,
 or end-of-conversation summaries.
 
-When invoking `loom_learn`, omit the `ingestion_mode` field — the Loom
-server will hardcode it to `live_mcp_capture` at the MCP boundary.
+When invoking `loom_learn`, always include these three required fields:
+- `content` — the verbatim text
+- `namespace` — the project namespace below
+- `source` — set to `"claude-desktop"` (or `"claude-web"` if you are running in the Claude.ai browser interface rather than the native Desktop app)
+
+Omit the `ingestion_mode` field — the Loom server hardcodes it to
+`live_mcp_capture` at the MCP boundary.
