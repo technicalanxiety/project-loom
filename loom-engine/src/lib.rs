@@ -9,6 +9,7 @@ pub mod crypto;
 pub mod db;
 pub mod llm;
 pub mod pipeline;
+pub mod telemetry;
 pub mod types;
 pub mod worker;
 

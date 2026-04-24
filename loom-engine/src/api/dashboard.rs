@@ -4,14 +4,20 @@
 //! All endpoints are read-only GET handlers protected by bearer token middleware.
 //! Response types are defined here alongside the handlers.
 
+use std::convert::Infallible;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     Json,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tokio_stream::{wrappers::IntervalStream, StreamExt as _};
 use uuid::Uuid;
 
 use crate::api::mcp::AppState;
@@ -2340,6 +2346,97 @@ pub async fn handle_requeue_episode(
         processing_status: episode.processing_status,
         processing_attempts: episode.processing_attempts,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /dashboard/api/stream/telemetry — Server-Sent Events
+// ---------------------------------------------------------------------------
+
+/// Snapshot serialized as the SSE `data:` payload every second.
+///
+/// Mirrors the fields of `telemetry::state::TelemetryState` but with
+/// `VecDeque`s converted to `Vec`s and timestamped at serialization time.
+#[derive(Debug, Clone, Serialize)]
+pub struct TelemetrySnapshot {
+    pub ts: i64,
+    pub cpu_pct: f32,
+    pub mem_used_mib: u64,
+    pub mem_total_mib: u64,
+    pub ollama_model: Option<String>,
+    pub ollama_on_gpu: bool,
+    pub ollama_vram_mib: Option<u64>,
+    pub latency_classify_p50_ms: Option<f64>,
+    pub latency_retrieve_p50_ms: Option<f64>,
+    pub latency_rank_p50_ms: Option<f64>,
+    pub latency_compile_p50_ms: Option<f64>,
+    pub latency_total_p50_ms: Option<f64>,
+    pub active_ingestions: i64,
+    pub queue_depth: i64,
+    pub failed_episodes: i64,
+    pub sparkline_latency: Vec<crate::telemetry::state::DataPoint>,
+    pub sparkline_ingestion_rate: Vec<crate::telemetry::state::DataPoint>,
+    pub sparkline_compilation_rate: Vec<crate::telemetry::state::DataPoint>,
+    pub recent_errors: Vec<crate::telemetry::state::ExtractionError>,
+}
+
+/// SSE stream delivering a `TelemetrySnapshot` every second.
+///
+/// The stream never terminates server-side; clients disconnect by closing
+/// the `EventSource`. Axum's `KeepAlive` default (~15 s) emits comment
+/// frames during quiet periods so proxies do not time out the connection.
+///
+/// Reads use `try_read()` so a concurrent write from the sampler cannot
+/// delay a frame; a contended read emits a `: busy` comment and the client
+/// waits 1 s for the next frame.
+pub async fn handle_telemetry_stream(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let telemetry = state.telemetry.clone();
+    let interval = tokio::time::interval(std::time::Duration::from_secs(1));
+
+    let stream = IntervalStream::new(interval).map(move |_| {
+        let event = match telemetry.try_read() {
+            Ok(s) => {
+                let snapshot = TelemetrySnapshot {
+                    ts: chrono::Utc::now().timestamp_millis(),
+                    cpu_pct: s.cpu_pct,
+                    mem_used_mib: s.mem_used_mib,
+                    mem_total_mib: s.mem_total_mib,
+                    ollama_model: s.ollama_model.clone(),
+                    ollama_on_gpu: s.ollama_on_gpu,
+                    ollama_vram_mib: s.ollama_vram_mib,
+                    latency_classify_p50_ms: s.latency_classify_p50_ms,
+                    latency_retrieve_p50_ms: s.latency_retrieve_p50_ms,
+                    latency_rank_p50_ms: s.latency_rank_p50_ms,
+                    latency_compile_p50_ms: s.latency_compile_p50_ms,
+                    latency_total_p50_ms: s.latency_total_p50_ms,
+                    active_ingestions: s.active_ingestions,
+                    queue_depth: s.queue_depth,
+                    failed_episodes: s.failed_episodes,
+                    sparkline_latency: s.sparkline_latency.iter().cloned().collect(),
+                    sparkline_ingestion_rate: s
+                        .sparkline_ingestion_rate
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    sparkline_compilation_rate: s
+                        .sparkline_compilation_rate
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    recent_errors: s.recent_errors.iter().cloned().collect(),
+                };
+                match serde_json::to_string(&snapshot) {
+                    Ok(data) => Event::default().data(data),
+                    Err(_) => Event::default().comment("encode-error"),
+                }
+            }
+            Err(_) => Event::default().comment("busy"),
+        };
+        Ok(event)
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import { MetricsPage } from './pages/MetricsPage';
 import { PackDetailPage } from './pages/PackDetailPage';
 import { ParserHealthPage } from './pages/ParserHealthPage';
 import { PredicatesPage } from './pages/PredicatesPage';
+import { RuntimePage } from './pages/RuntimePage';
 
 function App() {
   return (
@@ -29,7 +30,10 @@ function App() {
 
           <nav>
             <div className="nav-section">Overview</div>
-            <NavLink to="/" end>Pipeline Health</NavLink>
+            <NavLink to="/" end>
+              Pipeline Health
+            </NavLink>
+            <NavLink to="/runtime">Runtime</NavLink>
 
             <div className="nav-section">Knowledge</div>
             <NavLink to="/entities">Entities</NavLink>
@@ -48,9 +52,7 @@ function App() {
             <NavLink to="/ingestion/parsers">Parser Health</NavLink>
           </nav>
 
-          <div className="sidebar-footer">
-            local
-          </div>
+          <div className="sidebar-footer">local</div>
         </aside>
 
         <main className="main-content">
@@ -67,6 +69,7 @@ function App() {
             <Route path="/benchmarks" element={<BenchmarkPage />} />
             <Route path="/ingestion/parsers" element={<ParserHealthPage />} />
             <Route path="/ingestion/distribution" element={<IngestionDistributionPage />} />
+            <Route path="/runtime" element={<RuntimePage />} />
           </Routes>
         </main>
       </div>

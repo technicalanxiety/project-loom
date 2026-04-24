@@ -40,6 +40,9 @@ tokio-util = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 dotenvy = "0.15"
+sysinfo = "0.33"
+async-stream = "0.3"
+tokio-stream = "0.1"
 
 [dev-dependencies]
 proptest = "1"

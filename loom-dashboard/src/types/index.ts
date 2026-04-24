@@ -436,3 +436,52 @@ export interface BenchmarkComparison {
     condition_c: ConditionSummary;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Streaming telemetry (/dashboard/api/stream/telemetry)
+// ---------------------------------------------------------------------------
+
+/** A single (timestamp, value) sample for sparkline rendering. */
+export interface DataPoint {
+  /** Unix milliseconds. */
+  ts: number;
+  v: number;
+}
+
+/** A recent extraction failure surfaced on the Runtime page. */
+export interface ExtractionError {
+  episode_id: string;
+  source: string;
+  error: string;
+  /** Unix milliseconds. */
+  occurred_at: number;
+}
+
+/** Snapshot pushed over SSE once per second. */
+export interface TelemetrySnapshot {
+  ts: number;
+  // Host
+  cpu_pct: number;
+  mem_used_mib: number;
+  mem_total_mib: number;
+  // Ollama
+  ollama_model: string | null;
+  ollama_on_gpu: boolean;
+  ollama_vram_mib: number | null;
+  // Pipeline stage latencies (p50, ms)
+  latency_classify_p50_ms: number | null;
+  latency_retrieve_p50_ms: number | null;
+  latency_rank_p50_ms: number | null;
+  latency_compile_p50_ms: number | null;
+  latency_total_p50_ms: number | null;
+  // Live counters
+  active_ingestions: number;
+  queue_depth: number;
+  failed_episodes: number;
+  // Sparklines (5-min rings, pushed every 5 s)
+  sparkline_latency: DataPoint[];
+  sparkline_ingestion_rate: DataPoint[];
+  sparkline_compilation_rate: DataPoint[];
+  // Error tail
+  recent_errors: ExtractionError[];
+}

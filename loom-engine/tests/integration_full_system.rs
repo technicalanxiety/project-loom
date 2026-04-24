@@ -115,6 +115,7 @@ async fn build_full_test_app() -> Router {
         pools,
         llm_client,
         config,
+        telemetry: loom_engine::telemetry::new_shared(),
     };
 
     // MCP routes

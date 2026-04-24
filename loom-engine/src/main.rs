@@ -17,6 +17,7 @@ mod crypto;
 mod db;
 mod llm;
 mod pipeline;
+mod telemetry;
 mod types;
 mod worker;
 
@@ -84,10 +85,13 @@ async fn main() {
 
     let bearer_token = config.loom_bearer_token.clone();
 
+    let telemetry_handle = telemetry::new_shared();
+
     let state = AppState {
         pools,
         llm_client,
         config,
+        telemetry: telemetry_handle.clone(),
     };
 
     // MCP routes — all protected by bearer token middleware.
@@ -234,6 +238,10 @@ async fn main() {
             "/dashboard/api/benchmarks/{id}",
             get(dashboard::handle_benchmark_detail),
         )
+        .route(
+            "/dashboard/api/stream/telemetry",
+            get(dashboard::handle_telemetry_stream),
+        )
         .layer(middleware::from_fn_with_state(
             bearer_token.clone(),
             require_bearer_token,
@@ -270,6 +278,13 @@ async fn main() {
         None, // default poll interval (5s)
         Some(state.config.worker_concurrency),
     );
+
+    let _telemetry_handle = tokio::spawn(telemetry::sampler::run_sampler(
+        telemetry_handle,
+        state.pools.clone(),
+        state.config.llm.ollama_url.clone(),
+        cancel_token.clone(),
+    ));
 
     let _scheduler_handles = scheduler::start_scheduler(
         state.pools.offline.clone(),
