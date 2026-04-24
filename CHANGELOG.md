@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Streaming runtime telemetry (ADR 010)
+
+- New `/dashboard/api/stream/telemetry` SSE endpoint pushes a
+  `TelemetrySnapshot` every second. Host CPU / memory (via `sysinfo`) are
+  sampled every tick; Ollama `/api/ps`, pipeline-stage p50 latency
+  (PERCENTILE_CONT over the most recent 60 `loom_audit_log` rows), and
+  episode state counts are sampled every 5 seconds. Results live in an
+  `Arc<RwLock<TelemetryState>>` shared between the sampler and the SSE
+  handler — no new DB tables, no migrations.
+- New `loom-engine/src/telemetry/` module: `state.rs` (ring buffers for
+  5 minutes of sparkline history, de-duplicated error tail) and
+  `sampler.rs` (cancellation-aware background task with
+  log-once-on-transition error handling for Ollama / DB outages).
+- New dashboard `Runtime` page (`/runtime`) renders a btop-style dense
+  view: CPU + memory gauges, Ollama model + GPU/CPU badge, per-stage
+  latency bars, queue counters with threshold-based colors, and a
+  recent-failures table. Inline SVG sparklines — no charting library
+  added.
+- New Rust dependencies: `sysinfo 0.33`, `async-stream 0.3`,
+  `tokio-stream 0.1`. No new npm dependencies.
+- EventSource runs through Caddy's existing `header_up Authorization`
+  injection on `/dashboard/api/*`; the dashboard needs no client-side
+  token handling.
+- ADR 010 covers the design decisions: SSE over WebSockets, in-process
+  ring buffers over a time-series DB, `sysinfo` over NVML, and why
+  browser auth requires no changes.
+
 #### Real benchmark pipeline (conditions B and C)
 
 - Replaced the synthetic benchmark runner with a real pipeline execution.

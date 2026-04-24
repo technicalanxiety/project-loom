@@ -32,6 +32,7 @@ use crate::db::episodes::{self, NewEpisode};
 use crate::db::facts;
 use crate::db::pool::DbPools;
 use crate::llm::client::LlmClient;
+use crate::telemetry::SharedTelemetry;
 use crate::llm::embeddings;
 use crate::pipeline::online::{
     classify::{self, ClassifyStageOutput},
@@ -60,6 +61,9 @@ pub struct AppState {
     pub llm_client: LlmClient,
     /// Application configuration.
     pub config: AppConfig,
+    /// Live runtime telemetry — written by the background sampler, read by
+    /// the SSE handler in `api::dashboard`.
+    pub telemetry: SharedTelemetry,
 }
 
 // ---------------------------------------------------------------------------

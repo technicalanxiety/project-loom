@@ -81,6 +81,7 @@ fn app_no_db() -> Router {
         pools,
         llm_client,
         config,
+        telemetry: loom_engine::telemetry::new_shared(),
     };
 
     Router::new()

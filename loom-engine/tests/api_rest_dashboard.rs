@@ -84,6 +84,7 @@ async fn build_test_app() -> Router {
         pools,
         llm_client,
         config,
+        telemetry: loom_engine::telemetry::new_shared(),
     };
 
     // REST /api/learn — bearer-token protected
