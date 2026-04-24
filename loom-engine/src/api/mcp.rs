@@ -32,8 +32,8 @@ use crate::db::episodes::{self, NewEpisode};
 use crate::db::facts;
 use crate::db::pool::DbPools;
 use crate::llm::client::LlmClient;
-use crate::telemetry::SharedTelemetry;
 use crate::llm::embeddings;
+use crate::telemetry::SharedTelemetry;
 use crate::pipeline::online::{
     classify::{self, ClassifyStageOutput},
     compile::{self, CompilationInput, HotTierItem},

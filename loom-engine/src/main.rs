@@ -85,13 +85,13 @@ async fn main() {
 
     let bearer_token = config.loom_bearer_token.clone();
 
-    let telemetry_handle = telemetry::new_shared();
+    let telemetry_state = telemetry::new_shared();
 
     let state = AppState {
         pools,
         llm_client,
         config,
-        telemetry: telemetry_handle.clone(),
+        telemetry: telemetry_state.clone(),
     };
 
     // MCP routes — all protected by bearer token middleware.
@@ -279,8 +279,8 @@ async fn main() {
         Some(state.config.worker_concurrency),
     );
 
-    let _telemetry_handle = tokio::spawn(telemetry::sampler::run_sampler(
-        telemetry_handle,
+    let _sampler_task = tokio::spawn(telemetry::sampler::run_sampler(
+        telemetry_state,
         state.pools.clone(),
         state.config.llm.ollama_url.clone(),
         cancel_token.clone(),

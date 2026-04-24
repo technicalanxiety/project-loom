@@ -345,7 +345,7 @@ function ErrorRow({ err }: { err: ExtractionError }) {
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export function RuntimePage() {
-  const snap = useTelemetryStream();
+  const { snapshot: snap, connected } = useTelemetryStream();
 
   if (!snap) {
     return (
@@ -383,7 +383,28 @@ export function RuntimePage() {
         >
           OVERVIEW / RUNTIME
         </div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--fg-1)' }}>Runtime</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--fg-1)' }}>
+            Runtime
+          </h1>
+          {!connected && (
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 3,
+                background: 'var(--signal-error-bg)',
+                color: 'var(--signal-error)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+              }}
+              title="SSE stream disconnected — the browser will auto-reconnect."
+            >
+              Connection lost
+            </span>
+          )}
+        </div>
         <div
           style={{
             fontSize: 'var(--text-sm)',

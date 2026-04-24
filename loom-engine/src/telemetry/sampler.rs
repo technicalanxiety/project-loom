@@ -357,3 +357,129 @@ async fn query_db_snapshot(pools: &DbPools) -> Result<DbSnapshot, sqlx::Error> {
         recent_errors,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// reqwest with `rustls-no-provider` panics on first TLS use unless a
+    /// provider is installed. Install once per test module.
+    fn setup() {
+        crate::crypto::ensure_crypto_provider();
+    }
+
+    #[tokio::test]
+    async fn poll_ollama_maps_loaded_gpu_model() {
+        setup();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/ps"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "models": [{
+                    "name": "gemma4:26b",
+                    // 8 GiB reported — non-zero means on GPU
+                    "size_vram": 8_u64 * 1024 * 1024 * 1024,
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let http = reqwest::Client::new();
+        let snap = poll_ollama(&http, &server.uri()).await.expect("ok");
+
+        assert_eq!(snap.model.as_deref(), Some("gemma4:26b"));
+        assert!(snap.on_gpu);
+        assert_eq!(snap.vram_mib, Some(8192));
+    }
+
+    #[tokio::test]
+    async fn poll_ollama_reports_cpu_when_size_vram_zero() {
+        setup();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/ps"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "models": [{ "name": "qwen2.5:14b", "size_vram": 0 }]
+            })))
+            .mount(&server)
+            .await;
+
+        let http = reqwest::Client::new();
+        let snap = poll_ollama(&http, &server.uri()).await.expect("ok");
+
+        assert_eq!(snap.model.as_deref(), Some("qwen2.5:14b"));
+        assert!(!snap.on_gpu);
+        assert_eq!(snap.vram_mib, None);
+    }
+
+    #[tokio::test]
+    async fn poll_ollama_empty_models_means_no_model_loaded() {
+        setup();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/ps"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "models": [] })))
+            .mount(&server)
+            .await;
+
+        let http = reqwest::Client::new();
+        let snap = poll_ollama(&http, &server.uri()).await.expect("ok");
+
+        assert!(snap.model.is_none());
+        assert!(!snap.on_gpu);
+        assert!(snap.vram_mib.is_none());
+    }
+
+    #[tokio::test]
+    async fn poll_ollama_non_2xx_returns_no_model_loaded() {
+        // Ollama reachable but returning an error body — treat as
+        // "no model loaded" rather than flagging the transport as broken.
+        setup();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/ps"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let http = reqwest::Client::new();
+        let snap = poll_ollama(&http, &server.uri()).await.expect("ok");
+
+        assert!(snap.model.is_none());
+        assert!(!snap.on_gpu);
+    }
+
+    #[tokio::test]
+    async fn poll_ollama_connection_error_surfaces_as_err() {
+        // A port that cannot accept connections → request layer error.
+        // This is the path that triggers the healthy→unhealthy log
+        // transition in run_sampler.
+        setup();
+        let http = reqwest::Client::new();
+        let res = poll_ollama(&http, "http://127.0.0.1:1").await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn poll_ollama_trims_trailing_slash_from_base_url() {
+        setup();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/ps"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "models": [] })))
+            .mount(&server)
+            .await;
+
+        // Pass the base URL with a trailing slash — must not produce //api/ps.
+        let http = reqwest::Client::new();
+        let url_with_slash = format!("{}/", server.uri());
+        poll_ollama(&http, &url_with_slash).await.expect("ok");
+    }
+}
