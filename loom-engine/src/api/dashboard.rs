@@ -2116,13 +2116,20 @@ pub async fn handle_benchmark_detail(
 }
 
 /// Trigger a new benchmark run. Executes all 10+ tasks across A/B/C conditions.
+///
+/// Runs the real embedding + retrieval + compilation pipeline for conditions B
+/// and C. Requires the embedding model to be reachable. May take several
+/// minutes on iGPU hosts.
 pub async fn handle_run_benchmark(
     State(state): State<AppState>,
 ) -> Result<Json<crate::types::benchmark::BenchmarkRunSummary>, DashboardError> {
-    let pool = &state.pools.offline;
-    let run = crate::pipeline::benchmark::execute_benchmark(pool)
-        .await
-        .map_err(|e| DashboardError::Database(e.to_string()))?;
+    let run = crate::pipeline::benchmark::execute_benchmark(
+        &state.pools,
+        &state.llm_client,
+        &state.config,
+    )
+    .await
+    .map_err(|e| DashboardError::Database(e.to_string()))?;
     tracing::info!(run_id = %run.id, name = %run.name, "benchmark run completed");
     Ok(Json(run))
 }

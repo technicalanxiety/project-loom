@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Real benchmark pipeline (conditions B and C)
+
+- Replaced the synthetic benchmark runner with a real pipeline execution.
+  Conditions B and C now actually embed the query (via `generate_embedding`),
+  execute retrieval profiles against the live database, apply weights and the
+  four-dimension ranker, and compile the context package — the same stages as
+  `loom_think`, minus LLM classification (task class is inferred from the task
+  name prefix to keep benchmark latency deterministic).
+- Precision is now a real signal: fraction of `expected_entities` whose names
+  appear (case-insensitive) in the compiled context package. If the `benchmark`
+  namespace has no episodes, conditions B and C correctly return zero — that is
+  the accurate result, not a defect.
+- Condition A (no memory) returns empty context immediately, as before.
+- Condition C includes hot-tier items; condition B (episode-only) does not.
+- `execute_benchmark` signature changed from `(pool: &PgPool)` to
+  `(pools: &DbPools, llm_client: &LlmClient, config: &AppConfig)`.
+- Removed four unit tests that validated hardcoded mock arithmetic; replaced
+  with tests for `precision_from_context` and `task_class_from_name`.
+
 #### Dashboard design system
 
 - New `loom-dashboard/src/design-system.css` token layer: full color
