@@ -1,111 +1,140 @@
-/**
- * Pipeline health overview page.
- *
- * Displays episode counts, entity breakdowns, fact stats,
- * queue depth, and active model configuration.
- */
 import type React from 'react';
 import { getPipelineHealth } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import type { CountByKey } from '../types';
 
-/** Render a key-count breakdown as a simple list. */
-const CountList: React.FC<{ title: string; items: CountByKey[] }> = ({ title, items }) => (
-  <div className="card">
-    <h3 style={{ fontSize: '0.95rem', marginBottom: '0.5rem' }}>{title}</h3>
-    {items.length === 0 ? (
-      <p style={{ color: '#999', fontSize: '0.85rem' }}>No data</p>
-    ) : (
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {items.map((item) => (
-          <li
-            key={item.key}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              padding: '0.25rem 0',
-              fontSize: '0.85rem',
-              borderBottom: '1px solid #f0f0f0',
-            }}
-          >
-            <span>{item.key}</span>
-            <span style={{ fontWeight: 600 }}>{item.count}</span>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-);
+function inferMode(source: string): 'live' | 'seed' | 'vendor' {
+  if (source.startsWith('vendor.') || source.startsWith('vendor-')) return 'vendor';
+  if (source.startsWith('loom-seed') || source === 'loom_seed') return 'seed';
+  return 'live';
+}
 
-/** Pipeline health dashboard — the default landing page. */
+const MODE_COLOR: Record<string, string> = {
+  live:   'var(--moss-600)',
+  seed:   'var(--saffron-500)',
+  vendor: 'var(--indigo-400)',
+};
+
+const BreakdownPanel: React.FC<{ title: string; meta: string; items: CountByKey[]; colorFn?: (key: string) => string }> = ({
+  title, meta, items, colorFn,
+}) => {
+  const max = Math.max(...items.map((i) => i.count), 1);
+  return (
+    <section className="panel">
+      <h3>{title}</h3>
+      <p className="panel-meta">{meta}</p>
+      {items.length === 0 ? (
+        <p style={{ color: 'var(--fg-muted)', fontSize: 'var(--text-sm)' }}>No data</p>
+      ) : (
+        items.slice(0, 8).map((item) => {
+          const color = colorFn ? colorFn(item.key) : 'var(--indigo-400)';
+          const pct = Math.round((item.count / max) * 100);
+          return (
+            <div className="bk-row" key={item.key}>
+              <div className="bk-swatch" style={{ background: color }} />
+              <div className="bk-key">{item.key}</div>
+              <div className="bk-bar">
+                <span style={{ width: `${pct}%`, background: color }} />
+              </div>
+              <div className="bk-count numeric">{item.count.toLocaleString()}</div>
+            </div>
+          );
+        })
+      )}
+    </section>
+  );
+};
+
 export const HomePage: React.FC = () => {
   const { data, loading, error } = useApi(() => getPipelineHealth(), []);
 
   return (
     <div>
       <div className="page-header">
-        <h2>Pipeline Health</h2>
-        <p>Overview of episode ingestion, entity extraction, and fact management.</p>
+        <div className="page-header-titles">
+          <div className="page-eyebrow">Overview / Pipeline Health</div>
+          <h2>Pipeline health</h2>
+          <p>Episode ingestion, extraction queue, and current fact inventory.</p>
+        </div>
       </div>
 
-      {loading && <p className="loading">Loading health data…</p>}
+      {loading && <p className="loading">Loading…</p>}
       {error && <p className="error">{error}</p>}
 
       {data && (
         <>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '1rem',
-              marginBottom: '1.5rem',
-            }}
-          >
-            <div className="card">
-              <p style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase' }}>
-                Current Facts
-              </p>
-              <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{data.facts_current}</p>
+          {/* KPI tiles */}
+          <div className="kpi-grid">
+            <div className="kpi accent">
+              <div className="kpi-eyebrow">Current facts</div>
+              <div className="kpi-value numeric">{data.facts_current.toLocaleString()}</div>
             </div>
-            <div className="card">
-              <p style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase' }}>
-                Superseded Facts
-              </p>
-              <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{data.facts_superseded}</p>
+            <div className="kpi">
+              <div className="kpi-eyebrow">Superseded</div>
+              <div className="kpi-value numeric">{data.facts_superseded.toLocaleString()}</div>
+              {data.facts_current > 0 && (
+                <div className="kpi-sub">
+                  {((data.facts_superseded / (data.facts_current + data.facts_superseded)) * 100).toFixed(1)}% of total
+                </div>
+              )}
             </div>
-            <div className="card">
-              <p style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase' }}>
-                Queue Depth
-              </p>
-              <p style={{ fontSize: '1.5rem', fontWeight: 700 }}>{data.queue_depth}</p>
+            <div className="kpi">
+              <div className="kpi-eyebrow">Queue depth</div>
+              <div className="kpi-value numeric">{data.queue_depth}</div>
+              <div className="kpi-sub">pending episodes</div>
             </div>
-            <div className="card">
-              <p style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase' }}>
-                Extraction Model
-              </p>
-              <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>{data.extraction_model ?? '—'}</p>
+            <div className="kpi">
+              <div className="kpi-eyebrow">Extraction model</div>
+              <div className="kpi-value model">{data.extraction_model ?? '—'}</div>
             </div>
-            <div className="card">
-              <p style={{ fontSize: '0.75rem', color: '#888', textTransform: 'uppercase' }}>
-                Classification Model
-              </p>
-              <p style={{ fontSize: '0.95rem', fontWeight: 600 }}>
-                {data.classification_model ?? '—'}
-              </p>
+            <div className="kpi">
+              <div className="kpi-eyebrow">Classification model</div>
+              <div className="kpi-value model">{data.classification_model ?? '—'}</div>
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1rem',
-            }}
-          >
-            <CountList title="Episodes by Source" items={data.episodes_by_source} />
-            <CountList title="Episodes by Namespace" items={data.episodes_by_namespace} />
-            <CountList title="Entities by Type" items={data.entities_by_type} />
+          {/* Two-up panels */}
+          <div className="panel-grid">
+            <BreakdownPanel
+              title="Episodes by source"
+              meta={`${data.episodes_by_source.length} source${data.episodes_by_source.length !== 1 ? 's' : ''}`}
+              items={data.episodes_by_source}
+              colorFn={(key) => MODE_COLOR[inferMode(key)]}
+            />
+            <BreakdownPanel
+              title="Entities by type"
+              meta={`${data.entities_by_type.length} type${data.entities_by_type.length !== 1 ? 's' : ''}`}
+              items={data.entities_by_type}
+            />
           </div>
+
+          {/* Episodes by namespace */}
+          {data.episodes_by_namespace.length > 0 && (
+            <>
+              <div className="section-head">
+                <h3>
+                  Episodes by namespace
+                  <span className="count-pill">{data.episodes_by_namespace.length}</span>
+                </h3>
+              </div>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Namespace</th>
+                    <th className="cell-num">Episodes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.episodes_by_namespace.map((row) => (
+                    <tr key={row.key}>
+                      <td className="cell-id">{row.key}</td>
+                      <td className="cell-num numeric">{row.count.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       )}
     </div>

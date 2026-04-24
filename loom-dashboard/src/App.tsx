@@ -1,4 +1,5 @@
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
+import './design-system.css';
 import './App.css';
 import { BenchmarkPage } from './pages/BenchmarkPage';
 import { CompilationDetailPage } from './pages/CompilationDetailPage';
@@ -13,21 +14,22 @@ import { PackDetailPage } from './pages/PackDetailPage';
 import { ParserHealthPage } from './pages/ParserHealthPage';
 import { PredicatesPage } from './pages/PredicatesPage';
 
-/** Root application component with sidebar navigation and route definitions. */
 function App() {
   return (
     <BrowserRouter>
       <div className="app-layout">
         <aside className="sidebar">
           <div className="sidebar-brand">
-            <h1>Loom</h1>
-            <p>Memory Compiler</p>
+            <div className="loom-mark" aria-hidden="true" />
+            <div>
+              <div className="brand-name">loom</div>
+              <div className="brand-sub">/memory</div>
+            </div>
           </div>
+
           <nav>
             <div className="nav-section">Overview</div>
-            <NavLink to="/" end>
-              Pipeline Health
-            </NavLink>
+            <NavLink to="/" end>Pipeline Health</NavLink>
 
             <div className="nav-section">Knowledge</div>
             <NavLink to="/entities">Entities</NavLink>
@@ -45,6 +47,10 @@ function App() {
             <NavLink to="/ingestion/distribution">Distribution</NavLink>
             <NavLink to="/ingestion/parsers">Parser Health</NavLink>
           </nav>
+
+          <div className="sidebar-footer">
+            local
+          </div>
         </aside>
 
         <main className="main-content">

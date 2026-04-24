@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Dashboard design system
+
+- New `loom-dashboard/src/design-system.css` token layer: full color
+  palette (indigo warp, linen weft, madder, saffron, moss), semantic
+  aliases (`--fg-1`, `--surface-canvas`, `--signal-error`, etc.),
+  typography scale, spacing, radius, shadow, and motion variables.
+- Three variable-weight web fonts added to `public/fonts/`:
+  Inter Variable (UI body), JetBrains Mono Variable (code, labels,
+  numeric columns), and Fraunces Variable (display / brand wordmark).
+- Sidebar redesigned: CSS-rendered plain-weave logomark (linen warp
+  threads, saffron weft threads on indigo ground), Fraunces "loom"
+  wordmark, mono "/memory" subtext, saffron top-stripe accent, and a
+  saffron inset shadow on the active nav item.
+- `HomePage` (Pipeline Health) rebuilt to the design-system spec: KPI
+  tiles with indigo accent top border; two-up breakdown panels for
+  episodes-by-source and entities-by-type with inline bar charts and
+  ingestion-mode color coding (moss = `live_mcp_capture`, saffron =
+  `user_authored_seed`, indigo = `vendor_import`); episodes-by-namespace
+  table in monospace tabular numerics.
+- `App.css` rewritten entirely using design tokens — no raw hex values
+  remain in layout or component styles.
+
 #### Extraction-model guidance for iGPU / shared-memory hosts (ADR 009)
 
 - ADR 009 introduces a third `EXTRACTION_MODEL` tier for hosts whose
