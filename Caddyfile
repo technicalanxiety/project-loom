@@ -1,17 +1,25 @@
 # Caddyfile — Caddy reverse proxy for Project Loom
 #
-# By default Caddy serves only localhost (self-signed cert via its local CA).
-# To also serve on a LAN IP (e.g. a headless Linux node), set LOOM_LAN_HOST
-# in .env to the host's LAN address (e.g. 192.168.1.50). Caddy will issue
-# an internal cert for that address automatically.
+# Caddy always serves localhost. When LOOM_HOST in .env is set to something
+# other than localhost (e.g. a LAN IP or FQDN), Caddy also binds that
+# address and issues an internal cert for it. See .env.example for details.
 #
-#   LOOM_LAN_HOST=192.168.1.50   # set in .env; leave unset for localhost-only
+# Note: the engine's LOOM_HOST (bind address) is separately forced to
+# 0.0.0.0 in docker-compose.yml, so changing LOOM_HOST here does not
+# change the engine's bind.
 
 {
 	# Global options
+
+	# Chrome (and most TLS libraries) do not send SNI when connecting to
+	# a bare IP address — RFC 6066 forbids IP literals in SNI. Without
+	# SNI, Caddy cannot tell which of its configured sites a client wants
+	# and drops the handshake with an internal alert. default_sni names
+	# a fallback so Caddy serves LOOM_HOST's cert when SNI is absent.
+	default_sni {$LOOM_HOST:localhost}
 }
 
-localhost, {$LOOM_LAN_HOST:localhost} {
+localhost, {$LOOM_HOST:localhost} {
 	tls internal
 	# ── MCP endpoints → loom-engine ──────────────────────────
 	# External MCP clients (Claude Code, Claude Desktop, ChatGPT Desktop,

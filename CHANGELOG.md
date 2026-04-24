@@ -82,6 +82,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Caddy TLS on LAN deployments (`LOOM_HOST` plumbing + SNI fallback)
+
+- `Caddyfile` was referencing `$LOOM_LAN_HOST`, a variable that was never
+  defined in `.env`, `.env.example`, or `docker-compose.yml`. The
+  fallback `{$LOOM_LAN_HOST:localhost}` silently resolved to `localhost`,
+  so Caddy never provisioned a cert for the deployment's LAN IP. Swapped
+  the reference to the existing `$LOOM_HOST` to avoid introducing a
+  parallel variable.
+- `docker-compose.yml` caddy service now passes `LOOM_HOST` through to
+  the container. Compose's project-level `.env` only substitutes into
+  the compose file itself — it does not auto-inject variables into
+  containers. Caddy's container env was empty, so the variable reference
+  in the Caddyfile never resolved.
+- New global `default_sni {$LOOM_HOST:localhost}` in the Caddyfile.
+  Chrome and most TLS libraries do not send SNI when connecting to a
+  bare IP literal (per RFC 6066). With multiple configured sites
+  (`localhost` + the LAN IP) Caddy could not pick a cert and dropped
+  the handshake with `ERR_SSL_PROTOCOL_ERROR` on the browser side. The
+  directive names a fallback so the right cert serves even without SNI.
+- `.env.example` `LOOM_HOST` redocumented as "the public address this
+  deployment is reachable at" (used by Caddy for cert hostname + SNI
+  fallback). Default flipped from `0.0.0.0` to `localhost`; the `0.0.0.0`
+  was the engine's internal-bind meaning, which is separately set by
+  an explicit override in `docker-compose.yml` and does not belong in
+  `.env.example`.
+
 #### LLM pipeline on memory-bandwidth-bound hardware
 
 - `LlmClient::REQUEST_TIMEOUT` bumped from 30 s to 300 s

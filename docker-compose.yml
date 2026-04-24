@@ -113,6 +113,12 @@ services:
       # manage a token. External clients calling /mcp/* or /api/* must
       # still provide their own Authorization header.
       LOOM_BEARER_TOKEN: "${LOOM_BEARER_TOKEN}"
+      # Public address the deployment is reachable at. Caddy uses this to
+      # provision a TLS cert for the right hostname and as the default_sni
+      # for clients that don't send SNI (Chrome w/ IP literals, curl, etc).
+      # Unlike loom-engine, caddy is NOT overridden — it needs the real
+      # public value from .env.
+      LOOM_HOST: "${LOOM_HOST:-localhost}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - dashboard_dist:/srv/dashboard:ro
