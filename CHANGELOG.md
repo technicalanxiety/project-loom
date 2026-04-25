@@ -9,6 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Dashboard visual standardization across all 9 pages
+
+- Apr 2026 redesign delivered in three commits on `main`. The change is
+  visual-only: no API changes, no schema changes, no client behavior
+  changes. The dashboard now uses one consistent vocabulary
+  (`.page-header`, `.kpi-grid`, `.panel`, `.tbl`, status pills, threshold
+  tones) across every route.
+- **CSS foundation** (`App.css`, additive only): status pills
+  (`.pill-success/-warning/-error/-info/-neutral`), tier pills
+  (`.pill-tier-{hot,warm,cold}`), `.inline-bar` with tone modifiers,
+  `.filter-bar` + `.form-control` + `.empty-state` + `.skeleton-row`,
+  Runtime utilities (`.gauge`, `.stage-row`, `.queue-grid`, `.spark`),
+  Distribution stacked-bar (`.dist-row`/`-stack`/`-seg-*`), Conflicts
+  candidate-pair, Benchmarks winner card, callouts (`.callout-warn`/
+  `-error`/`-info`), `.kpi-unit`. No new tokens; everything reuses the
+  existing `--signal-*` / `--surface-*` / `--border-*` / `--fg-*` family.
+- **Threshold helpers** (`src/lib/thresholds.ts`): single source of
+  truth for the moss/saffron/madder cutoffs — `cpuTone`, `memTone`,
+  `latencyTone`, `queueTone`, `failedTone`, `confidenceTone`,
+  `utilizationTone`, plus `freshness()` for parser staleness and
+  `relativeTime()` for "3m ago" labels.
+- **Dark-theme rot fixed**: Distribution and Parser Health were drafted
+  against a dark theme the rest of the app abandoned (`#222`, `#333`,
+  `#aaa`, `#3a2a1a` callouts). Both rebuilt against light tokens.
+  Distribution now renders as a horizontal stacked bar per namespace
+  (live / seed / vendor in moss / saffron / indigo). Parser Health uses
+  a freshness pill (fresh / aging / stale, sorted stale-first) and a
+  KPI strip with a madder-accented "stale > 7d" tile when any are
+  stale.
+- **Per-page redesigns**:
+  - **Runtime**: KPI strip (CPU · memory · total p50 · queue · model),
+    `.pulse` while connected, `.pill-error` while reconnecting, panel-
+    grid for resources + pipeline, `.tbl` for failures with mode-pilled
+    sources.
+  - **Compilations**: KPI strip (count · p50 · p95 · median tokens),
+    `.tbl` with class pills, confidence and latency rendered as
+    `.inline-bar` + tabular value with threshold tinting.
+  - **Entities**: KPI strip, `.filter-bar` for namespace + search,
+    tier pills, salience as `.inline-bar`, aliases shown under the
+    entity name.
+  - **Predicates**: card-per-candidate with inline Map / Promote
+    drawers (was: forms crammed into a table cell), pack browser as a
+    KPI grid with the largest pack accented.
+  - **Metrics**: top KPI strip (today's precision · p95 retrieval ·
+    active models · hot-tier util) and a 2×2 panel grid. Local
+    sparkline / bar-chart components dropped in favour of the shared
+    `.bk-row` + `.spark` vocabulary.
+  - **Benchmarks**: Full Loom card picks up `.bench-card.winner`
+    (warp-thread top border + moss tint + "best" pill), deltas
+    rendered as `.bench-delta.up/.down` pills, run-list status pills
+    are now palette-correct.
+  - **Conflicts**: card-per-conflict layout (was: JSON dumped in a
+    `<pre>` inside a 200×80 scroll box), candidate-pair viz with
+    similarity score, action buttons recommend Merge or Keep Separate
+    based on the resolver's score, resolved cards collapse into the
+    `.resolved` style.
+
 #### Streaming runtime telemetry (ADR 010)
 
 - New `/dashboard/api/stream/telemetry` SSE endpoint pushes a

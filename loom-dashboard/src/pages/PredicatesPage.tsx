@@ -1,11 +1,17 @@
 /**
  * Predicate management page.
  *
- * Shows predicate candidates awaiting review with actions to map
- * or promote, and a pack browser with links to pack detail views.
+ * Two surfaces stacked under one .page-header:
+ *   - Candidates: card-per-candidate with inline Map/Promote drawers.
+ *     Each card shows the predicate name, occurrences (with an inline-bar
+ *     scaling against the run's max), example facts inline, and the
+ *     resolution actions. The drawer expands underneath the card so the
+ *     forms aren't crammed into a table cell.
+ *   - Predicate packs: a kpi-style grid of pack cards. The pack with
+ *     the most predicates picks up the .kpi.accent warp-thread border.
  */
 import type React from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   getPredicateCandidates,
@@ -16,26 +22,31 @@ import { useApi } from '../hooks/useApi';
 import type { PredicateCandidateSummary } from '../types';
 
 // ---------------------------------------------------------------------------
-// Candidate row with inline resolution actions
+// Candidate card with inline resolution drawer
 // ---------------------------------------------------------------------------
 
-/** Props for a single candidate row. */
-interface CandidateRowProps {
+interface CandidateCardProps {
   candidate: PredicateCandidateSummary;
+  maxOccurrences: number;
   onResolved: () => void;
 }
 
-/** A single predicate candidate row with map/promote actions. */
-const CandidateRow: React.FC<CandidateRowProps> = ({ candidate, onResolved }) => {
+const CandidateCard: React.FC<CandidateCardProps> = ({ candidate, maxOccurrences, onResolved }) => {
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [showPromote, setShowPromote] = useState(false);
-  const [showMap, setShowMap] = useState(false);
+  const [drawer, setDrawer] = useState<'map' | 'promote' | null>(null);
   const [targetPack, setTargetPack] = useState('core');
   const [category, setCategory] = useState('structural');
   const [mappedTo, setMappedTo] = useState('');
 
-  /** Submit a map resolution. */
+  const isResolved = candidate.resolved_at != null;
+  const occurrencePct = maxOccurrences > 0 ? (candidate.occurrences / maxOccurrences) * 100 : 0;
+
+  const closeDrawer = () => {
+    setDrawer(null);
+    setActionError(null);
+  };
+
   const handleMap = async () => {
     if (!mappedTo.trim()) {
       setActionError('Enter a canonical predicate to map to.');
@@ -49,14 +60,13 @@ const CandidateRow: React.FC<CandidateRowProps> = ({ candidate, onResolved }) =>
         mapped_to: mappedTo.trim(),
       });
       onResolved();
-    } catch (err: unknown) {
+    } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Map failed');
     } finally {
       setSubmitting(false);
     }
   };
 
-  /** Submit a promote resolution. */
   const handlePromote = async () => {
     setSubmitting(true);
     setActionError(null);
@@ -67,147 +77,114 @@ const CandidateRow: React.FC<CandidateRowProps> = ({ candidate, onResolved }) =>
         category,
       });
       onResolved();
-    } catch (err: unknown) {
+    } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Promote failed');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const isResolved = candidate.resolved_at != null;
-
   return (
-    <tr style={{ borderBottom: '1px solid #f0f0f0', verticalAlign: 'top' }}>
-      <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>
-        {candidate.predicate}
-      </td>
-      <td style={{ padding: '0.5rem' }}>{candidate.occurrences}</td>
-      <td style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
-        {candidate.example_facts?.length ?? 0} facts
-      </td>
-      <td style={{ padding: '0.5rem' }}>
-        {isResolved ? (
-          <span style={{ color: '#27ae60', fontWeight: 600 }}>
-            {candidate.mapped_to
-              ? `Mapped → ${candidate.mapped_to}`
-              : candidate.promoted_to_pack
-                ? `Promoted → ${candidate.promoted_to_pack}`
-                : 'Resolved'}
+    <div className={`conflict-card${isResolved ? ' resolved' : ''}`}>
+      <div className="conflict-card-head">
+        <h3 className="cell-id" style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+          {candidate.predicate}
+        </h3>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span
+            className="inline-bar tone-ok"
+            style={{ width: 80 }}
+            aria-hidden="true"
+            title={`${candidate.occurrences} occurrences`}
+          >
+            <span style={{ width: `${occurrencePct}%` }} />
           </span>
-        ) : (
-          <div>
-            {!(showMap || showPromote) && (
-              <div style={{ display: 'flex', gap: '0.35rem' }}>
+          <span className="cell-num" style={{ fontWeight: 600 }}>
+            {candidate.occurrences}
+          </span>
+        </span>
+      </div>
+      {candidate.example_facts && candidate.example_facts.length > 0 && (
+        <div
+          className="cell-muted"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 11, marginBottom: 8 }}
+        >
+          examples:{' '}
+          {candidate.example_facts.slice(0, 3).map((f, i) => (
+            <span key={f}>
+              {i > 0 && ' · '}
+              {f}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {isResolved ? (
+        <span className="pill pill-success">
+          <span className="dot" />
+          {candidate.mapped_to
+            ? `Mapped → ${candidate.mapped_to}`
+            : candidate.promoted_to_pack
+              ? `Promoted → ${candidate.promoted_to_pack}`
+              : 'Resolved'}
+        </span>
+      ) : (
+        <>
+          {drawer === null && (
+            <div className="conflict-card-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setDrawer('map')}>
+                Map
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setDrawer('promote')}
+              >
+                Promote
+              </button>
+            </div>
+          )}
+
+          {drawer === 'map' && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Canonical predicate to map to…"
+                value={mappedTo}
+                onChange={(e) => setMappedTo(e.target.value)}
+              />
+              <div className="conflict-card-actions">
                 <button
                   type="button"
-                  onClick={() => setShowMap(true)}
-                  style={{
-                    padding: '0.25rem 0.5rem',
-                    fontSize: '0.75rem',
-                    borderRadius: '4px',
-                    border: '1px solid #3498db',
-                    background: '#fff',
-                    color: '#3498db',
-                    cursor: 'pointer',
-                  }}
+                  className="btn btn-primary"
+                  disabled={submitting}
+                  onClick={handleMap}
                 >
-                  Map
+                  Confirm
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPromote(true)}
-                  style={{
-                    padding: '0.25rem 0.5rem',
-                    fontSize: '0.75rem',
-                    borderRadius: '4px',
-                    border: '1px solid #27ae60',
-                    background: '#fff',
-                    color: '#27ae60',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Promote
+                <button type="button" className="btn btn-ghost" onClick={closeDrawer}>
+                  Cancel
                 </button>
               </div>
-            )}
+            </div>
+          )}
 
-            {showMap && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                <input
-                  type="text"
-                  placeholder="Canonical predicate…"
-                  value={mappedTo}
-                  onChange={(e) => setMappedTo(e.target.value)}
-                  style={{
-                    padding: '0.25rem 0.4rem',
-                    fontSize: '0.8rem',
-                    borderRadius: '4px',
-                    border: '1px solid #ccc',
-                  }}
-                />
-                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={handleMap}
-                    style={{
-                      padding: '0.2rem 0.4rem',
-                      fontSize: '0.75rem',
-                      borderRadius: '4px',
-                      border: 'none',
-                      background: '#3498db',
-                      color: '#fff',
-                      cursor: submitting ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowMap(false);
-                      setActionError(null);
-                    }}
-                    style={{
-                      padding: '0.2rem 0.4rem',
-                      fontSize: '0.75rem',
-                      borderRadius: '4px',
-                      border: '1px solid #ccc',
-                      background: '#fff',
-                      color: '#666',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {showPromote && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+          {drawer === 'promote' && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <select
+                  className="form-control"
                   value={targetPack}
                   onChange={(e) => setTargetPack(e.target.value)}
-                  style={{
-                    padding: '0.25rem 0.4rem',
-                    fontSize: '0.8rem',
-                    borderRadius: '4px',
-                    border: '1px solid #ccc',
-                  }}
                 >
                   <option value="core">core</option>
                   <option value="grc">grc</option>
                 </select>
                 <select
+                  className="form-control"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  style={{
-                    padding: '0.25rem 0.4rem',
-                    fontSize: '0.8rem',
-                    borderRadius: '4px',
-                    border: '1px solid #ccc',
-                  }}
                 >
                   <option value="structural">structural</option>
                   <option value="temporal">temporal</option>
@@ -215,54 +192,31 @@ const CandidateRow: React.FC<CandidateRowProps> = ({ candidate, onResolved }) =>
                   <option value="operational">operational</option>
                   <option value="regulatory">regulatory</option>
                 </select>
-                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={handlePromote}
-                    style={{
-                      padding: '0.2rem 0.4rem',
-                      fontSize: '0.75rem',
-                      borderRadius: '4px',
-                      border: 'none',
-                      background: '#27ae60',
-                      color: '#fff',
-                      cursor: submitting ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowPromote(false);
-                      setActionError(null);
-                    }}
-                    style={{
-                      padding: '0.2rem 0.4rem',
-                      fontSize: '0.75rem',
-                      borderRadius: '4px',
-                      border: '1px solid #ccc',
-                      background: '#fff',
-                      color: '#666',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
               </div>
-            )}
+              <div className="conflict-card-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={submitting}
+                  onClick={handlePromote}
+                >
+                  Confirm
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={closeDrawer}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
-            {actionError && (
-              <p style={{ color: '#c0392b', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                {actionError}
-              </p>
-            )}
-          </div>
-        )}
-      </td>
-    </tr>
+          {actionError && (
+            <div className="callout callout-error" style={{ marginTop: 10 }}>
+              <div className="callout-body">{actionError}</div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 };
 
@@ -270,7 +224,6 @@ const CandidateRow: React.FC<CandidateRowProps> = ({ candidate, onResolved }) =>
 // Main page component
 // ---------------------------------------------------------------------------
 
-/** Predicate candidates and pack browser. */
 export const PredicatesPage: React.FC = () => {
   const {
     data: candidates,
@@ -285,82 +238,127 @@ export const PredicatesPage: React.FC = () => {
   } = useApi(() => getPredicatePacks(), []);
 
   const pendingCount = candidates?.filter((c) => !c.resolved_at).length ?? 0;
+  const resolvedCount = candidates ? candidates.length - pendingCount : 0;
+
+  const maxOccurrences = useMemo(
+    () => candidates?.reduce((max, c) => Math.max(max, c.occurrences), 0) ?? 0,
+    [candidates],
+  );
+
+  const accentPack = useMemo(() => {
+    if (!packs || packs.length === 0) return null;
+    return packs.reduce((a, b) => (a.predicate_count >= b.predicate_count ? a : b)).pack;
+  }, [packs]);
 
   return (
-    <div>
+    <>
       <div className="page-header">
-        <h2>Predicates</h2>
-        <p>
-          Manage custom predicate candidates and browse predicate packs.
-          {candidates && ` ${pendingCount} candidates pending review.`}
-        </p>
+        <div className="page-header-titles">
+          <div className="page-eyebrow">Operations / Predicates</div>
+          <h2>Predicates</h2>
+          <p>
+            Manage custom predicate candidates and browse predicate packs.
+            {candidates && ` ${pendingCount} candidates pending review.`}
+          </p>
+        </div>
       </div>
 
-      {/* Candidates section */}
-      <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Candidates</h3>
-      {loadingCandidates && <p className="loading">Loading candidates…</p>}
-      {errorCandidates && <p className="error">{errorCandidates}</p>}
+      {/* Candidates */}
+      <div className="section-head">
+        <h3>
+          Candidates <span className="count-pill">{pendingCount} pending</span>
+        </h3>
+        {resolvedCount > 0 && (
+          <span
+            className="count-pill"
+            style={{ background: 'var(--moss-100)', color: 'var(--moss-800)' }}
+          >
+            {resolvedCount} resolved
+          </span>
+        )}
+      </div>
 
-      {candidates && (
-        <div className="card" style={{ overflowX: 'auto', marginBottom: '2rem' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #eee', textAlign: 'left' }}>
-                <th style={{ padding: '0.5rem' }}>Predicate</th>
-                <th style={{ padding: '0.5rem' }}>Occurrences</th>
-                <th style={{ padding: '0.5rem' }}>Examples</th>
-                <th style={{ padding: '0.5rem' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {candidates.map((c) => (
-                <CandidateRow key={c.id} candidate={c} onResolved={refetchCandidates} />
-              ))}
-              {candidates.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="placeholder">
-                    No predicate candidates.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {loadingCandidates && <div className="loading">Loading candidates…</div>}
+      {errorCandidates && <div className="error">{errorCandidates}</div>}
 
-      {/* Pack browser section */}
-      <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Predicate Packs</h3>
-      {loadingPacks && <p className="loading">Loading packs…</p>}
-      {errorPacks && <p className="error">{errorPacks}</p>}
+      {candidates &&
+        (candidates.length === 0 ? (
+          <div className="empty-state">
+            <h3>No predicate candidates</h3>
+            <p>
+              Custom predicates emerge as the extraction pipeline encounters relations that aren't
+              in the active packs. Once they appear, you can map them to canonical predicates or
+              promote them into a pack.
+            </p>
+          </div>
+        ) : (
+          <div>
+            {candidates.map((c) => (
+              <CandidateCard
+                key={c.id}
+                candidate={c}
+                maxOccurrences={maxOccurrences}
+                onResolved={refetchCandidates}
+              />
+            ))}
+          </div>
+        ))}
 
-      {packs && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: '1rem',
-          }}
-        >
-          {packs.map((p) => (
-            <Link
-              key={p.pack}
-              to={`/predicates/packs/${encodeURIComponent(p.pack)}`}
-              style={{ textDecoration: 'none', color: 'inherit' }}
-            >
-              <div className="card" style={{ cursor: 'pointer' }}>
-                <h4 style={{ fontSize: '0.95rem', marginBottom: '0.25rem' }}>{p.pack}</h4>
-                <p style={{ fontSize: '0.8rem', color: '#666' }}>
-                  {p.description ?? 'No description'}
-                </p>
-                <p style={{ fontSize: '0.85rem', fontWeight: 600, marginTop: '0.5rem' }}>
-                  {p.predicate_count} predicates
-                </p>
-              </div>
-            </Link>
-          ))}
-          {packs.length === 0 && <p className="placeholder">No packs found.</p>}
-        </div>
-      )}
-    </div>
+      {/* Packs */}
+      <div className="section-head" style={{ marginTop: 'var(--space-8)' }}>
+        <h3>
+          Predicate packs <span className="count-pill">{packs?.length ?? 0}</span>
+        </h3>
+      </div>
+
+      {loadingPacks && <div className="loading">Loading packs…</div>}
+      {errorPacks && <div className="error">{errorPacks}</div>}
+
+      {packs &&
+        (packs.length === 0 ? (
+          <div className="empty-state">
+            <h3>No packs available</h3>
+            <p>
+              Predicate packs ship with the engine. If this list is empty, check that the
+              <code>core</code> and <code>grc</code> packs are seeded in the database.
+            </p>
+          </div>
+        ) : (
+          <div className="kpi-grid">
+            {packs.map((p) => (
+              <Link
+                key={p.pack}
+                to={`/predicates/packs/${encodeURIComponent(p.pack)}`}
+                style={{ textDecoration: 'none', color: 'inherit' }}
+              >
+                <div className={`kpi${p.pack === accentPack ? ' accent' : ''}`}>
+                  <div className="kpi-eyebrow">Pack</div>
+                  <div className="kpi-value model" style={{ marginBottom: 8 }}>
+                    {p.pack}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 12,
+                      color: 'var(--fg-3)',
+                      marginBottom: 8,
+                      minHeight: '2.4em',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {p.description ?? 'No description'}
+                  </div>
+                  <div
+                    className="cell-num"
+                    style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 13 }}
+                  >
+                    {p.predicate_count} predicates
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ))}
+    </>
   );
 };
