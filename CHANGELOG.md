@@ -190,19 +190,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Pipeline reliability: bounded embedding input + constrained extraction output (ADR 011)
 
-- `EMBED_CHAR_LIMIT` lowered from 30,000 → 16,000 in
-  [loom-engine/src/llm/embeddings.rs](loom-engine/src/llm/embeddings.rs).
-  The previous limit assumed ~4 chars/token (English prose) but Claude
-  Code transcripts contain escaped JSON, base64-encoded images, and
-  long tool-output blobs that tokenize at ~2 chars/token worst case.
-  8192 tokens × 2 chars/token = 16,384 chars → round down to 16,000
-  for safety. Eliminates the recurring `400 "the input length exceeds
-  the context length"` failures from `nomic-embed-text` that were
-  silently parking episodes in `processing_status = 'failed'` and
-  removing them from recall (the `embedding IS NOT NULL` filter at
+- `EMBED_CHAR_LIMIT` lowered from 30,000 → 8,000 in
+  [loom-engine/src/llm/embeddings.rs](loom-engine/src/llm/embeddings.rs)
+  (initially 16,000, dropped to 8,000 after observing recurring
+  failures). The 16K limit assumed ~2 chars/token but oversized
+  single-record chunks emitted by `bootstrap/claude_code_parser.py`
+  (per its design: a single Claude Code record exceeding
+  `MAX_CHUNK_BYTES = 4 KiB` is emitted as one oversized chunk rather
+  than splitting mid-record) routinely tokenize at the ~1 char/token
+  floor — every character its own WordPiece token. 8K matches the
+  worst case with a small safety margin and stops the recurring
+  `400 "the input length exceeds the context length"` failures.
+- `truncate: true` added to the Ollama embeddings request body in
+  [loom-engine/src/llm/client.rs](loom-engine/src/llm/client.rs).
+  Ollama's OpenAI-compat layer reads this non-standard field and
+  forwards it to the native `/api/embed` translator so the server
+  trims overflowing tokens server-side as a second line of defense.
+  The Azure OpenAI fallback path is unchanged (Azure handles its own
+  limits internally).
+- Episode `content` remains verbatim — the truncation is only what
+  the embedding model sees as input. ADR-005 preserved. The
+  truncation is paired with the retry/backoff state machine (ADR
+  007) so genuinely-unprocessable episodes still bound out, but
+  normal Claude Code transcripts no longer silently park in
+  `processing_status = 'failed'` and disappear from recall (the
+  `embedding IS NOT NULL` filter at
   [loom-engine/src/pipeline/online/retrieve.rs](loom-engine/src/pipeline/online/retrieve.rs)
-  excludes them). Episode `content` remains verbatim — the truncation
-  is only what the embedding model sees as input. ADR-005 preserved.
+  excludes NULL-embedding rows).
 - `LlmClient::call_llm_with_schema` added at
   [loom-engine/src/llm/client.rs](loom-engine/src/llm/client.rs).
   Wraps the existing chat-completions plumbing with a

@@ -198,6 +198,13 @@ impl LlmClient {
     ///
     /// Tries Ollama first with retries. Falls back to Azure OpenAI on
     /// connection errors.
+    ///
+    /// `truncate: true` asks Ollama's OpenAI-compat layer to drop tokens
+    /// past the embedding model's context window (8192 for
+    /// nomic-embed-text) instead of rejecting the request with HTTP 400
+    /// "the input length exceeds the context length". The field is
+    /// non-standard OpenAI but Ollama's `openai/openai.go` translator
+    /// reads it. See ADR-011 for the bounded-input rationale.
     pub async fn call_embeddings(
         &self,
         model: &str,
@@ -206,6 +213,7 @@ impl LlmClient {
         let body = json!({
             "model": model,
             "input": input,
+            "truncate": true,
         });
 
         let ollama_endpoint = format!("{}/v1/embeddings", self.ollama_url);

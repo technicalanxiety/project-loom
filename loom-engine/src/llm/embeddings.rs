@@ -12,15 +12,20 @@ use crate::config::LlmConfig;
 /// Expected embedding dimension for nomic-embed-text.
 pub const EXPECTED_DIMENSION: usize = 768;
 
-/// nomic-embed-text context window: 8192 tokens. The previous 30K-char
-/// budget assumed ~4 chars/token (typical English prose), but Claude Code
-/// transcripts contain escaped JSON, base64-encoded images, and tool-output
-/// blobs that tokenize at ~2 chars/token worst case. 8192 × 2 ≈ 16,384
-/// chars; we truncate at 16K so the worst case still fits with a small
-/// safety margin. Longer content is a deterministic poison pill — it will
-/// never embed and parks in `processing_status = 'failed'` after the
-/// retry budget bounds out (ADR-007). See ADR-011.
-const EMBED_CHAR_LIMIT: usize = 16_000;
+/// nomic-embed-text context window: 8192 tokens. Empirically, Claude Code
+/// transcripts with escaped JSON, base64-encoded images, and tool-output
+/// blobs tokenize at ~1 char/token in the absolute worst case (every
+/// character its own WordPiece token). 8K chars matches that floor with
+/// a small safety margin; longer content is truncated client-side AND we
+/// pass `truncate: true` on the Ollama embeddings request so the server
+/// trims anything we miss. See ADR-011.
+///
+/// The previous 16K limit assumed ~2 chars/token but oversized
+/// single-record chunks emitted by `bootstrap/claude_code_parser.py` (per
+/// its design: a single record exceeding `MAX_CHUNK_BYTES` is emitted
+/// as one oversized chunk rather than splitting mid-record) routinely
+/// exceeded the token window even at 16K chars.
+const EMBED_CHAR_LIMIT: usize = 8_000;
 
 // ---------------------------------------------------------------------------
 // Error type

@@ -84,24 +84,42 @@ model.
 
 Two bounded-system changes:
 
-### 1. Lower `EMBED_CHAR_LIMIT` from 30,000 to 16,000
+### 1. Lower `EMBED_CHAR_LIMIT` and pass `truncate: true` to Ollama
 
-Recompute the budget against worst-case tokenization:
-8192 tokens × 2 chars/token = 16,384 chars. Round down to 16,000 for a
-small safety margin. This is the simplest change that eliminates the
-embedding 400s deterministically, regardless of content type.
+Two-layer defense against oversized embedding inputs:
+
+**Layer A — client-side char cap.** `EMBED_CHAR_LIMIT = 8_000` chars.
+The first iteration of this ADR set it to 16,000 against a 2-chars/token
+assumption, but observed failures from
+`bootstrap/claude_code_parser.py` showed Claude Code transcripts can
+hit the absolute 1-char/token floor (every character its own WordPiece
+token) when the content is escape-heavy JSON or base64. The parser
+intentionally emits oversized single records as one chunk rather than
+splitting mid-record (see the `MAX_CHUNK_BYTES` comment) — those
+chunks slipped through the 16K cap. 8,000 chars matches 8192 tokens at
+the worst-case 1:1 ratio.
+
+**Layer B — server-side truncation.** Pass `truncate: true` on the
+Ollama embeddings request body. Ollama's `openai/openai.go`
+translator reads this field on the OpenAI-compat `/v1/embeddings`
+endpoint and forwards it to the native `/api/embed` handler, which
+drops overflowing tokens instead of returning HTTP 400. This is
+belt-and-suspenders against any oversized chunk that slips through
+Layer A (e.g., highly multi-byte content where char count
+underestimates byte/token count).
 
 The truncation is a *representational* decision — what the embedding
 model sees as input. The episode's `content` column remains verbatim,
-preserving ADR-005. Vector recall on episodes longer than 16K chars
+preserving ADR-005. Vector recall on episodes longer than 8K chars
 operates on the embedding of their leading content, which captures the
 topic signal in nearly all cases (Claude Code transcripts state the
 user's intent up front).
 
 A token-aware truncation pass (using the `tokenizers` crate to load
-nomic-embed-text's tokenizer.json and truncate to 7,500 tokens) is the
-correct long-term fix and is filed as a follow-up. The 16,000-char cap
-is the immediate, deterministic win.
+nomic-embed-text's tokenizer.json and truncate to ~7,500 tokens) is
+the still-cleaner long-term fix and is filed as a follow-up. With
+Layer B handling the residual cases, it's now a polish item rather
+than blocking work.
 
 ### 2. Constrain extraction output via `response_format: json_schema`
 
