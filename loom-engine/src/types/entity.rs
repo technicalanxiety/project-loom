@@ -127,7 +127,10 @@ pub struct EntityState {
 /// This is the raw extraction output that feeds into the 3-pass
 /// resolution algorithm. The `JsonSchema` derive emits the schema that
 /// Ollama's `response_format: json_schema` uses to constrain qwen2.5:14b
-/// output (see ADR-011).
+/// output (see ADR-011). The `properties` field is skipped from the
+/// schema because `serde_json::Value` produces an untyped fragment that
+/// Ollama's GBNF backend rejects; serde's `default` populates it as
+/// `null` if the LLM doesn't emit it, which is the common case.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExtractedEntity {
     /// Entity name as extracted by the LLM.
@@ -137,8 +140,11 @@ pub struct ExtractedEntity {
     /// Alias names found in the episode.
     #[serde(default)]
     pub aliases: Vec<String>,
-    /// Additional properties extracted by the LLM.
+    /// Additional properties extracted by the LLM. Hidden from the JSON
+    /// Schema so Ollama's structured-output validator accepts the
+    /// schema; deserializes via `#[serde(default)]` when present.
     #[serde(default)]
+    #[schemars(skip)]
     pub properties: serde_json::Value,
 }
 

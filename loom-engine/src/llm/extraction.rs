@@ -114,8 +114,9 @@ pub async fn extract_entities(
 
     tracing::info!(model, content_len = episode_content.len(), "starting entity extraction");
 
-    let schema = serde_json::to_value(schema_for!(ExtractionResponse))
+    let mut schema = serde_json::to_value(schema_for!(ExtractionResponse))
         .map_err(|e| ExtractionError::Deserialization(format!("entity schema build: {e}")))?;
+    sanitize_schema_for_ollama(&mut schema);
 
     let response = client
         .call_llm_with_schema(
@@ -191,8 +192,9 @@ pub async fn extract_facts(
 
     let system_prompt = assemble_fact_prompt(predicate_block, entity_names);
 
-    let schema = serde_json::to_value(schema_for!(FactExtractionResponse))
+    let mut schema = serde_json::to_value(schema_for!(FactExtractionResponse))
         .map_err(|e| ExtractionError::Deserialization(format!("fact schema build: {e}")))?;
+    sanitize_schema_for_ollama(&mut schema);
 
     let response = client
         .call_llm_with_schema(
@@ -298,6 +300,82 @@ fn deserialize_response<T: serde::de::DeserializeOwned>(
     )))
 }
 
+/// Sanitize a JSON Schema for Ollama's structured-output validator.
+///
+/// schemars emits draft-07 schemas with constructs that Ollama's
+/// `response_format` validator rejects with HTTP 500
+/// `"invalid JSON schema in format"`:
+///
+/// - top-level `$schema` URL declaration
+/// - `format` keywords (`date-time`, `email`, etc.) which the GBNF
+///   backend ignores and the validator dislikes
+/// - `default` values on properties (informational only — schemars
+///   adds them for `#[serde(default)]` fields)
+/// - `title` (clutter)
+/// - `"type": ["X", "null"]` arrays — schemars uses these for
+///   `Option<T>` of primitives. The validator wants a single-type
+///   string. Flattened to just `"X"`; the field is already optional
+///   via not appearing in `required`, so the LLM omits it instead of
+///   emitting `null` (deserialization handles either via
+///   `#[serde(default)]`).
+/// - `anyOf: [{...}, {"type": "null"}]` — schemars emits this for
+///   `Option<NestedStruct>`. Same treatment: collapse to the non-null
+///   option.
+///
+/// Recursively walks the schema and rewrites in place.
+fn sanitize_schema_for_ollama(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.remove("$schema");
+            map.remove("title");
+            map.remove("format");
+            map.remove("default");
+
+            // Flatten `"type": ["X", "null"]` → `"type": "X"`.
+            if let Some(serde_json::Value::Array(arr)) = map.get("type") {
+                let non_null: Vec<&serde_json::Value> = arr
+                    .iter()
+                    .filter(|v| v.as_str() != Some("null"))
+                    .collect();
+                if non_null.len() == 1 {
+                    let single = non_null[0].clone();
+                    map.insert("type".into(), single);
+                }
+            }
+
+            // Flatten `anyOf: [{...}, {"type": "null"}]` →
+            // hoist the non-null variant in place.
+            if let Some(serde_json::Value::Array(variants)) = map.get("anyOf") {
+                let non_null: Vec<serde_json::Value> = variants
+                    .iter()
+                    .filter(|v| {
+                        v.get("type").and_then(|t| t.as_str()) != Some("null")
+                    })
+                    .cloned()
+                    .collect();
+                if non_null.len() == 1 {
+                    map.remove("anyOf");
+                    if let serde_json::Value::Object(inner) = &non_null[0] {
+                        for (k, v) in inner {
+                            map.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+
+            for v in map.values_mut() {
+                sanitize_schema_for_ollama(v);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                sanitize_schema_for_ollama(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Strip optional markdown code fences (```json ... ```) from LLM output.
 fn strip_code_fences(s: &str) -> &str {
     let s = s.trim();
@@ -318,6 +396,80 @@ fn strip_code_fences(s: &str) -> &str {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // -- sanitize_schema_for_ollama -----------------------------------------
+
+    #[test]
+    fn sanitize_strips_known_problematic_keys() {
+        let mut schema = json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Foo",
+            "type": "object",
+            "properties": {
+                "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "default": null
+                }
+            }
+        });
+        sanitize_schema_for_ollama(&mut schema);
+        assert!(schema.get("$schema").is_none());
+        assert!(schema.get("title").is_none());
+        let ts = &schema["properties"]["ts"];
+        assert!(ts.get("format").is_none());
+        assert!(ts.get("default").is_none());
+        assert_eq!(ts["type"], "string");
+    }
+
+    #[test]
+    fn sanitize_flattens_nullable_type_array() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": ["string", "null"] }
+            }
+        });
+        sanitize_schema_for_ollama(&mut schema);
+        assert_eq!(schema["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn sanitize_collapses_anyof_with_null() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "marker": {
+                    "description": "optional marker",
+                    "anyOf": [
+                        { "$ref": "#/definitions/Marker" },
+                        { "type": "null" }
+                    ]
+                }
+            }
+        });
+        sanitize_schema_for_ollama(&mut schema);
+        let marker = &schema["properties"]["marker"];
+        assert!(marker.get("anyOf").is_none());
+        assert_eq!(marker["$ref"], "#/definitions/Marker");
+        assert_eq!(marker["description"], "optional marker");
+    }
+
+    #[test]
+    fn sanitize_leaves_required_array_alone() {
+        // `required` is also a JSON array of strings — must not be confused
+        // with a `type` array.
+        let mut schema = json!({
+            "type": "object",
+            "required": ["a", "b"],
+            "properties": {
+                "a": { "type": "string" },
+                "b": { "type": "string" }
+            }
+        });
+        sanitize_schema_for_ollama(&mut schema);
+        assert_eq!(schema["required"], json!(["a", "b"]));
+    }
 
     // -- ExtractionResponse deserialization ----------------------------------
 
