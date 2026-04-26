@@ -1,12 +1,17 @@
-//! Entity and fact extraction prompt execution via Gemma 4 26B MoE.
+//! Entity and fact extraction prompt execution via the configured extraction
+//! model (see ADR-009 for tier guidance — `qwen2.5:14b` on iGPU/APU hosts,
+//! `gemma4:26b` on discrete-GPU hosts, `gemma4:e4b` as a last resort).
 //!
 //! Provides [`extract_entities`] and [`extract_facts`] functions that call
-//! the LLM via [`LlmClient`], deserialize structured JSON responses into
-//! strict Rust types, and reject malformed output at the type boundary.
+//! the LLM via [`LlmClient::call_llm_with_schema`], passing JSON Schemas
+//! derived from [`ExtractionResponse`] / [`FactExtractionResponse`] so the
+//! provider constrains generation to schema-conformant output. See
+//! ADR-011 for why constrained generation replaced free-form prompting.
 //!
 //! Prompt templates are embedded as constants loaded from the `prompts/`
 //! directory at compile time.
 
+use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -51,14 +56,14 @@ pub enum ExtractionError {
 // ---------------------------------------------------------------------------
 
 /// Wrapper for the entity extraction LLM response.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ExtractionResponse {
     /// Extracted entities from the episode.
     pub entities: Vec<ExtractedEntity>,
 }
 
 /// Wrapper for the fact extraction LLM response.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct FactExtractionResponse {
     /// Extracted facts from the episode.
     pub facts: Vec<ExtractedFact>,
@@ -109,8 +114,17 @@ pub async fn extract_entities(
 
     tracing::info!(model, content_len = episode_content.len(), "starting entity extraction");
 
+    let schema = serde_json::to_value(schema_for!(ExtractionResponse))
+        .map_err(|e| ExtractionError::Deserialization(format!("entity schema build: {e}")))?;
+
     let response = client
-        .call_llm(model, ENTITY_EXTRACTION_PROMPT, episode_content)
+        .call_llm_with_schema(
+            model,
+            ENTITY_EXTRACTION_PROMPT,
+            episode_content,
+            "entity_extraction",
+            &schema,
+        )
         .await?;
 
     let extraction: ExtractionResponse = deserialize_response(&response, "entity extraction")?;
@@ -177,8 +191,17 @@ pub async fn extract_facts(
 
     let system_prompt = assemble_fact_prompt(predicate_block, entity_names);
 
+    let schema = serde_json::to_value(schema_for!(FactExtractionResponse))
+        .map_err(|e| ExtractionError::Deserialization(format!("fact schema build: {e}")))?;
+
     let response = client
-        .call_llm(model, &system_prompt, episode_content)
+        .call_llm_with_schema(
+            model,
+            &system_prompt,
+            episode_content,
+            "fact_extraction",
+            &schema,
+        )
         .await?;
 
     let extraction: FactExtractionResponse = deserialize_response(&response, "fact extraction")?;

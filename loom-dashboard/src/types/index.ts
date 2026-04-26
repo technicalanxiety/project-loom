@@ -377,6 +377,12 @@ export interface ResolvePredicateCandidateResponse {
   resolved_at: string;
 }
 
+/** Response after bulk-requeuing every episode in `failed` state. */
+export interface RequeueAllFailedResponse {
+  /** Number of episodes transitioned from `failed` back to `pending`. */
+  requeued: number;
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark types
 // ---------------------------------------------------------------------------

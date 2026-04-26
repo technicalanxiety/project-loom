@@ -43,6 +43,11 @@ dotenvy = "0.15"
 sysinfo = "0.33"
 async-stream = "0.3"
 tokio-stream = "0.1"
+# JSON Schema generation for LLM structured-output (response_format).
+# Used in src/llm/extraction.rs to constrain qwen2.5:14b output via Ollama's
+# OpenAI-compatible json_schema response format. See ADR-011. The `chrono`
+# feature is required for `DateTime<Utc>` fields on TemporalMarkers.
+schemars = { version = "0.8", features = ["chrono"] }
 
 [dev-dependencies]
 proptest = "1"

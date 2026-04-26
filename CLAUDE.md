@@ -150,3 +150,18 @@ burned once by mocked tests passing while a prod migration was broken.
   recency 0.25, stability 0.20, provenance 0.15) and the provenance
   coefficient (live 1.0, seed 0.8, vendor 0.6) are tuned. Don't
   retune without benchmark evidence.
+- **Touching the LLM client or extraction prompts?** Re-read
+  [ADR-009](docs/adr/009-extraction-model-for-igpu.md) (extraction
+  model tiers — `qwen2.5:14b` on iGPU/APU, `gemma4:26b` on discrete,
+  `gemma4:e4b` last resort) and [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)
+  (16K embedding char cap, schema-constrained extraction via
+  `response_format: json_schema`). The 300 s `REQUEST_TIMEOUT` is not
+  configurable — keeps the operating envelope honest.
+- **Touching the MCP wire protocol?** Re-read [ADR-008](docs/adr/008-mcp-wire-protocol.md).
+  The JSON-RPC dispatcher at `POST /mcp` and the per-tool REST
+  endpoints share handler code; the server hardcodes
+  `ingestion_mode = live_mcp_capture` at both entry points.
+- **Touching the dashboard's Runtime page or telemetry?** Re-read
+  [ADR-010](docs/adr/010-streaming-telemetry.md). The SSE stream at
+  `/dashboard/api/stream/telemetry` pushes a `TelemetrySnapshot` every
+  second from an in-process ring buffer — no time-series store.

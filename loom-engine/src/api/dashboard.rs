@@ -193,6 +193,13 @@ pub struct RequeueEpisodeResponse {
     pub processing_attempts: i32,
 }
 
+/// Response after bulk-requeuing every episode in `failed` state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequeueAllFailedResponse {
+    /// Number of episodes transitioned from `failed` back to `pending`.
+    pub requeued: u64,
+}
+
 /// Namespace configuration info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceInfo {
@@ -2346,6 +2353,36 @@ pub async fn handle_requeue_episode(
         processing_status: episode.processing_status,
         processing_attempts: episode.processing_attempts,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// POST /dashboard/api/episodes/failed/requeue-all
+// ---------------------------------------------------------------------------
+
+/// Bulk-reset every episode in `failed` state back to `pending`. Used by
+/// the dashboard's "Retry failed" button to clear the operator triage queue
+/// in one click after a root cause has been fixed (see ADR-011 for the
+/// canonical case: lowering `EMBED_CHAR_LIMIT` made previously-failing
+/// oversized episodes processable, but they still needed an explicit
+/// requeue to leave the failed state).
+///
+/// Idempotent — a request when no failures exist is a no-op and returns
+/// `{"requeued": 0}`.
+pub async fn handle_requeue_all_failed(
+    State(state): State<AppState>,
+) -> Result<Json<RequeueAllFailedResponse>, DashboardError> {
+    let pool = &state.pools.online;
+
+    let requeued = crate::db::episodes::requeue_all_failed_episodes(pool)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+
+    tracing::info!(
+        requeued,
+        "dashboard: bulk requeue of failed episodes"
+    );
+
+    Ok(Json(RequeueAllFailedResponse { requeued }))
 }
 
 // ---------------------------------------------------------------------------

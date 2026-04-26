@@ -223,6 +223,10 @@ async fn main() {
             get(dashboard::handle_failed_episodes),
         )
         .route(
+            "/dashboard/api/episodes/failed/requeue-all",
+            post(dashboard::handle_requeue_all_failed),
+        )
+        .route(
             "/dashboard/api/episodes/{id}/requeue",
             post(dashboard::handle_requeue_episode),
         )

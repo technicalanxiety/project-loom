@@ -390,6 +390,32 @@ pub async fn requeue_episode(pool: &PgPool, id: Uuid) -> Result<Option<Episode>,
     Ok(row)
 }
 
+/// Reset every episode currently in `failed` state back to `pending` so the
+/// worker re-attempts processing on its next poll. Bulk operator escape
+/// hatch — used by the "Retry failed" dashboard button after the root cause
+/// of a failure class has been fixed (see ADR-011 for the canonical case).
+///
+/// Returns the number of rows transitioned. A return of 0 is normal (no
+/// failures to retry) and is not an error.
+pub async fn requeue_all_failed_episodes(pool: &PgPool) -> Result<u64, EpisodeError> {
+    let result = sqlx::query(
+        r#"
+        UPDATE loom_episodes
+        SET processing_status       = 'pending',
+            processing_attempts     = 0,
+            processing_last_attempt = NULL,
+            processing_last_error   = NULL,
+            processed               = false
+        WHERE processing_status = 'failed'
+          AND deleted_at IS NULL
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
 /// Count episodes in `failed` state, excluding soft-deleted ones.
 pub async fn count_failed_episodes(pool: &PgPool) -> Result<i64, EpisodeError> {
     let count: i64 = sqlx::query_scalar(

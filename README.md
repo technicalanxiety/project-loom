@@ -73,7 +73,7 @@ graph TB
         end
 
         subgraph "Online Pipeline — Query Serving"
-            Classify[Intent Classifier<br/>Gemma 4 E4B]
+            Classify[Intent Classifier<br/>gemma4:e4b]
             Profiles[Retrieval Profiles<br/>tokio::join! parallel]
             Ranker[4-Dimension Ranker]
             Compiler[Context Compiler<br/>XML + JSON output]
@@ -81,18 +81,22 @@ graph TB
 
         subgraph "Offline Pipeline — tokio Spawned Tasks"
             Embed[Episode Embedder<br/>nomic-embed-text 768d]
-            Extract[Entity + Fact Extractor<br/>Gemma 4 26B MoE]
+            Extract[Entity + Fact Extractor<br/>qwen2.5:14b · gemma4:26b · gemma4:e4b<br/>schema-constrained output]
             Resolve[3-Pass Entity Resolver]
             Supersede[Supersession Resolver]
+        end
+
+        subgraph "Telemetry"
+            Tele[Sampler + Ring Buffer<br/>SSE @ /dashboard/api/stream/telemetry]
         end
     end
 
     subgraph "loom-dashboard"
-        DashUI[React SPA<br/>Pipeline Health · Graph Explorer<br/>Trace Viewer · Conflict Queue]
+        DashUI[React SPA — 13 pages<br/>Runtime · Pipeline Health · Compilations<br/>Entities · Predicates · Metrics · Benchmarks<br/>Conflicts · Parser Health · Distribution]
     end
 
     subgraph "Ollama (native by default, docker opt-in)"
-        Models[gemma4:26b<br/>gemma4:e4b<br/>nomic-embed-text]
+        Models[Extraction tier per ADR-009:<br/>qwen2.5:14b iGPU/APU · gemma4:26b dGPU<br/>gemma4:e4b classifier · nomic-embed-text]
     end
 
     subgraph "PostgreSQL 17"
@@ -131,6 +135,10 @@ graph TB
     Classify -.-> Models
     Embed -.-> Models
 
+    Tele -.->|Read| DB
+    Tele -.->|Probe| Models
+    DashAPI -.->|SSE| Tele
+
     Profiles -.->|Read| DB
     Compiler -.->|Read| DB
     Supersede -.->|Write| DB
@@ -151,7 +159,8 @@ graph TB
 The online and offline pipelines share PostgreSQL but use **separate connection pools** so offline processing never starves query serving:
 
 - **Online pipeline** (loom_think): classify → retrieve → weight → rank → compile. Target < 500ms p95.
-- **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately. Each episode moves through a `pending → processing → completed | failed` state machine with exponential backoff on failure (see [ADR-007](docs/adr/007-episode-processing-retry-backoff.md)); permanently-unprocessable episodes surface on the dashboard for operator triage rather than retrying forever.
+- **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately. Each episode moves through a `pending → processing → completed | failed` state machine with exponential backoff on failure (see [ADR-007](docs/adr/007-episode-processing-retry-backoff.md)); permanently-unprocessable episodes surface on the dashboard for operator triage rather than retrying forever. Embedding inputs are bounded at 16K characters and extraction output is constrained to a JSON Schema via Ollama's `response_format` so neither stage produces routine poison pills (see [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)).
+- **Telemetry sampler**: a 1 Hz background task samples host CPU/memory, Ollama state, pipeline-stage p50 latency, queue counters, and recent failures into an in-process ring buffer. The dashboard subscribes via SSE at `/dashboard/api/stream/telemetry` (see [ADR-010](docs/adr/010-streaming-telemetry.md)). No new tables, no time-series store.
 
 ## Supported Clients
 
@@ -184,8 +193,8 @@ guide index and the checklist for wiring a new client.
 |-------|-----------|---------|
 | **Engine** | Rust (tokio + axum 0.8 + sqlx 0.8) | Single binary serving all APIs. `ring` is the rustls crypto provider (keeps `aws-lc-sys` out of the build). |
 | **Database** | PostgreSQL 17 + pgvector (pgAudit optional) | Single system of record. Vector similarity, graph traversal, application-level audit logging via `loom_audit_log`. |
-| **LLM Inference** | Ollama | Gemma 4 26B MoE (extraction), Gemma 4 E4B (classification), nomic-embed-text (embeddings 768d). |
-| **Dashboard** | React 19 + Vite 8 + TypeScript 6 + vitest 4 + biome 2 | Pipeline health, graph explorer, trace viewer, conflict review, metrics, parser health, ingestion distribution. |
+| **LLM Inference** | Ollama (native by default) | Hardware-tier extraction model — `qwen2.5:14b` for iGPU/APU, `gemma4:26b` for discrete GPU, `gemma4:e4b` for tight memory (see [ADR-009](docs/adr/009-extraction-model-for-igpu.md)). `gemma4:e4b` for classification, `nomic-embed-text` for embeddings (768d). Extraction calls use `response_format: json_schema` for guaranteed-parseable output ([ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)). |
+| **Dashboard** | React 19 + Vite 8 + TypeScript 6 + vitest 4 + biome 2 | 13 pages: Runtime (SSE-driven live status), Pipeline Health, Compilations + detail, Entities + detail, Predicates + Pack detail, Metrics, Benchmarks, Conflicts, Parser Health, Ingestion Distribution. |
 | **Reverse Proxy** | Caddy | Automatic TLS, static file serving, API routing, bearer-token injection on `/dashboard/api/*`. |
 | **Auth** | Bearer token (tower middleware) | Constant-time comparison, applied at router level. External clients (MCP / REST) carry their own token; Caddy injects on behalf of the in-browser SPA. |
 
@@ -207,9 +216,10 @@ guide index and the checklist for wiring a new client.
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) v2+
-- **GPU recommended** for Ollama (NVIDIA with CUDA support for Gemma 4 26B MoE)
-- 16GB+ RAM recommended (Gemma 4 26B MoE requires significant memory)
-- CPU-only mode works but extraction will be significantly slower
+- 16 GB+ RAM. Extraction-model choice follows hardware tier per [ADR-009](docs/adr/009-extraction-model-for-igpu.md):
+  - **Discrete GPU (≥16 GB VRAM)**: `gemma4:26b` — full MoE extractor.
+  - **iGPU / APU / CPU-only with ≥16 GB system RAM**: `qwen2.5:14b` — best quality/speed for shared-memory hosts (~30–60 s per episode on a Beelink SER5-class Ryzen).
+  - **Very tight memory (≤16 GB total, no discrete GPU)**: `gemma4:e4b` accepting lower extraction quality, or run extraction off-host via Azure OpenAI fallback.
 
 ## Quick Start
 
@@ -246,8 +256,12 @@ app), then:
 
 ```bash
 ollama pull nomic-embed-text
-ollama pull gemma4:e4b
-ollama pull gemma4:26b        # optional; only if you have >=24 GB unified memory
+ollama pull gemma4:e4b        # always — used for classification on every host
+
+# Pick ONE extraction-tier model per ADR-009:
+ollama pull qwen2.5:14b       # iGPU / APU / CPU-only with ≥16 GB system RAM
+# ollama pull gemma4:26b      # discrete GPU with ≥16 GB VRAM
+# (very tight memory) reuse gemma4:e4b — set EXTRACTION_MODEL=gemma4:e4b
 ```
 
 If you are on Linux with CUDA and prefer to run Ollama in a container,
@@ -353,10 +367,11 @@ All configuration is via environment variables. Copy `.env.example` to `.env` an
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OLLAMA_URL` | Ollama API base URL | `http://ollama:11434` |
-| `EXTRACTION_MODEL` | Model for entity/fact extraction | `gemma4:26b` |
+| `OLLAMA_URL` | Ollama API base URL | `http://host.docker.internal:11434` (native Ollama on the Docker host — see [ADR-002](docs/adr/002-local-llm-inference.md) amendment) |
+| `EXTRACTION_MODEL` | Model for entity/fact extraction. Tier guidance per [ADR-009](docs/adr/009-extraction-model-for-igpu.md) — `gemma4:26b` (discrete GPU), `qwen2.5:14b` (iGPU/APU/CPU), or `gemma4:e4b` (very tight memory, lower quality). | `gemma4:e4b` |
 | `CLASSIFICATION_MODEL` | Model for intent classification | `gemma4:e4b` |
 | `EMBEDDING_MODEL` | Model for embeddings (768d) | `nomic-embed-text` |
+| `WORKER_CONCURRENCY` | Parallel offline-extraction workers. Set to `1` on iGPU/APU hosts to serialize inference — parallel runs thrash shared memory bandwidth and end up *slower*. Discrete-GPU hosts can leave the default. | `4` |
 
 ### Azure OpenAI (Fallback)
 
@@ -667,16 +682,15 @@ External clients calling `/mcp/*` or `/api/*` still carry their own bearer token
 
 | View | Description |
 |------|-------------|
+| **Runtime** | Live SSE-driven status: host CPU/memory, Ollama model + GPU/CPU badge, per-stage p50 latency, ingestion queue counters, recent failures table, **Retry failed** bulk-requeue button. Connection pulses at 1 Hz. See [ADR-010](docs/adr/010-streaming-telemetry.md). |
 | **Pipeline Health** | Episode counts by source/namespace, entity counts by type, pending queue depth, failed-episode count, model config |
-| **Compilation Traces** | Paginated loom_think history with drill-down to per-candidate score breakdowns |
-| **Knowledge Graph Explorer** | Entity search, detail view, visual 1-2 hop neighborhood graph |
-| **Entity Conflict Queue** | Unresolved resolution conflicts. Actions: merge, keep separate, split |
-| **Predicate Candidate Review** | Custom predicates with occurrence counts. Actions: map to canonical, promote to pack |
-| **Predicate Pack Browser** | All packs with predicate counts, categories, usage heatmap |
-| **Retrieval Quality Metrics** | Precision over time, latency percentiles (p50/p95/p99), classification confidence |
-| **Extraction Quality** | Model comparison, resolution method distribution, custom predicate growth |
-| **Hot-Tier Utilization** | Per-namespace hot tier entity/fact counts and budget utilization |
-| **Parser Health** | Per-bootstrap-parser episode counts, parser versions, last-ingested timestamps |
+| **Compilations** | Paginated loom_think history with drill-down to per-candidate score breakdowns |
+| **Entities** | Entity search and detail view with 1-2 hop neighborhood graph, tier pills, salience bars |
+| **Predicates** | Custom predicate candidates (map to canonical / promote to pack drawers) plus a pack browser with usage heatmap |
+| **Conflicts** | Entity resolution conflict queue. Actions: merge, keep separate, split |
+| **Metrics** | Retrieval precision over time, latency percentiles (p50/p95/p99), classification confidence, extraction quality, hot-tier utilization |
+| **Benchmarks** | A/B/C condition runs, per-task precision/latency, winner card |
+| **Parser Health** | Per-bootstrap-parser episode counts, parser versions, freshness pills, last-ingested timestamps |
 | **Ingestion Mode Distribution** | Per-namespace Mode 1/2/3 breakdown with a seed-only warning list |
 
 ### Dashboard API Endpoints
@@ -707,7 +721,12 @@ All dashboard endpoints are under `/dashboard/api/`. Requests flow through Caddy
 | POST | `/dashboard/api/conflicts/{id}/resolve` | Resolve entity conflict |
 | POST | `/dashboard/api/predicates/candidates/{id}/resolve` | Resolve predicate candidate |
 | GET | `/dashboard/api/episodes/failed` | List episodes that exhausted retries (operator triage queue) |
-| POST | `/dashboard/api/episodes/{id}/requeue` | Reset an episode's processing state to `pending` (after fixing the root cause) |
+| POST | `/dashboard/api/episodes/{id}/requeue` | Reset a single episode's processing state to `pending` (after fixing the root cause) |
+| POST | `/dashboard/api/episodes/failed/requeue-all` | Bulk-reset every episode in `failed` state. Backs the Runtime page's "Retry failed" button. Returns `{requeued: <count>}`. |
+| GET | `/dashboard/api/benchmarks` | List benchmark runs (most recent first) |
+| GET | `/dashboard/api/benchmarks/{id}` | Benchmark comparison detail (A/B/C conditions per task) |
+| POST | `/dashboard/api/benchmarks/run` | Trigger a new benchmark run |
+| GET | `/dashboard/api/stream/telemetry` | Server-Sent Events stream — `TelemetrySnapshot` every 1 s. Powers the Runtime page. |
 
 ---
 
@@ -873,8 +892,11 @@ project-loom/
 │   │   │   ├── dashboard.rs            # Dashboard API handlers
 │   │   │   └── auth.rs                 # Bearer token middleware
 │   │   ├── worker/
-│   │   │   ├── processor.rs            # Background processing
+│   │   │   ├── processor.rs            # Background processing (claim, extract, retry/backoff per ADR-007)
 │   │   │   └── scheduler.rs            # Periodic tasks (snapshots, health)
+│   │   ├── telemetry/                  # SSE telemetry sampler + ring buffers (ADR-010)
+│   │   │   ├── state.rs                # In-process state, sparkline ring buffers, error tail
+│   │   │   └── sampler.rs              # 1 Hz / 5 s background sampler
 │   │   └── types/                      # Shared data types (serde)
 │   │       ├── episode.rs
 │   │       ├── entity.rs
@@ -884,7 +906,7 @@ project-loom/
 │   │       ├── compilation.rs
 │   │       ├── audit.rs
 │   │       └── mcp.rs
-│   ├── migrations/                     # PostgreSQL migrations (001-013)
+│   ├── migrations/                     # PostgreSQL migrations (001-016)
 │   └── prompts/                        # LLM prompt templates
 │       ├── entity_extraction.txt
 │       ├── fact_extraction.txt
@@ -907,12 +929,18 @@ project-loom/
 │
 ├── docs/
 │   ├── adr/                            # Architecture Decision Records
+│   │   ├── 000-template.md
 │   │   ├── 001-postgresql-single-store.md
-│   │   ├── 002-local-llm-inference.md
+│   │   ├── 002-local-llm-inference.md          # + native-Ollama amendment
 │   │   ├── 003-namespace-isolation.md
 │   │   ├── 004-ingestion-modes.md
 │   │   ├── 005-verbatim-content-invariant.md
-│   │   └── 006-dashboard-auth-injection.md
+│   │   ├── 006-dashboard-auth-injection.md
+│   │   ├── 007-episode-processing-retry-backoff.md   # poison-pill bounded retries
+│   │   ├── 008-mcp-wire-protocol.md                  # JSON-RPC 2.0 dispatcher at POST /mcp
+│   │   ├── 009-extraction-model-for-igpu.md          # qwen2.5:14b for shared-memory hosts
+│   │   ├── 010-streaming-telemetry.md                # SSE Runtime page
+│   │   └── 011-bounded-inputs-constrained-outputs.md # 16K embed cap + json_schema extraction
 │   └── clients/                        # Per-client integration guides
 │       ├── README.md                   # Index + new-client checklist
 │       ├── claude-code.md

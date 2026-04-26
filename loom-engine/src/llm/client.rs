@@ -129,16 +129,53 @@ impl LlmClient {
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<serde_json::Value, LlmError> {
-        let body = json!({
-            "model": model,
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user",   "content": user_prompt },
-            ],
-            "temperature": 0.1,
-        });
+        self.call_llm_internal(model, system_prompt, user_prompt, None)
+            .await
+    }
 
-        // Attempt Ollama
+    /// Send a chat completion request constrained to a JSON Schema.
+    ///
+    /// Identical to [`call_llm`] except the request body includes
+    /// `response_format: {"type": "json_schema", "json_schema": {...}}`.
+    /// On Ollama ≥ 0.5 and Azure OpenAI this forces the model to emit
+    /// output conforming to `schema` via constrained generation
+    /// (llama.cpp GBNF on the Ollama side). Eliminates the parse-failure
+    /// mode that free-form prompting produces on smaller models like
+    /// `qwen2.5:14b`. See ADR-011.
+    ///
+    /// Ollama reads only `json_schema.schema`; the `name` and `strict`
+    /// fields are passed through for OpenAI/Azure compatibility but are
+    /// no-ops on the Ollama path. Schema features that GBNF cannot
+    /// enforce (regex `pattern`, `format` keywords, recursive `$ref`)
+    /// are silently dropped — keep schemas to objects, arrays, enums,
+    /// and primitive types.
+    pub async fn call_llm_with_schema(
+        &self,
+        model: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+        schema_name: &str,
+        schema: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        self.call_llm_internal(
+            model,
+            system_prompt,
+            user_prompt,
+            Some((schema_name, schema)),
+        )
+        .await
+    }
+
+    /// Internal dispatch shared by [`call_llm`] and [`call_llm_with_schema`].
+    async fn call_llm_internal(
+        &self,
+        model: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+        schema: Option<(&str, &serde_json::Value)>,
+    ) -> Result<serde_json::Value, LlmError> {
+        let body = build_chat_body(model, system_prompt, user_prompt, schema);
+
         let ollama_endpoint = format!("{}/v1/chat/completions", self.ollama_url);
         match self
             .post_with_retry(&ollama_endpoint, &body, None)
@@ -150,7 +187,8 @@ impl LlmClient {
                     error = %e,
                     "Ollama unreachable, attempting Azure OpenAI fallback"
                 );
-                self.call_llm_azure(system_prompt, user_prompt).await
+                self.call_llm_azure_internal(system_prompt, user_prompt, schema)
+                    .await
             }
             Err(e) => Err(e),
         }
@@ -192,22 +230,18 @@ impl LlmClient {
     /// Chat completion via Azure OpenAI (fallback path).
     ///
     /// Uses extended retry logic for rate limits (429): up to 5 retries
-    /// with exponential backoff (1s, 2s, 4s, 8s, 16s).
-    async fn call_llm_azure(
+    /// with exponential backoff (1s, 2s, 4s, 8s, 16s). When `schema` is
+    /// `Some`, the request includes `response_format: json_schema` and
+    /// Azure constrains output via the OpenAI structured-outputs path.
+    async fn call_llm_azure_internal(
         &self,
         system_prompt: &str,
         user_prompt: &str,
+        schema: Option<(&str, &serde_json::Value)>,
     ) -> Result<serde_json::Value, LlmError> {
         let (url, key) = self.azure_config()?;
 
-        let body = json!({
-            "model": "gpt-4.1-mini",
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user",   "content": user_prompt },
-            ],
-            "temperature": 0.1,
-        });
+        let body = build_chat_body("gpt-4.1-mini", system_prompt, user_prompt, schema);
 
         let endpoint = format!("{url}/v1/chat/completions");
         let resp = self
@@ -409,6 +443,43 @@ impl LlmClient {
                 .unwrap_or_else(|| "unknown".to_string()),
         ))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Request builders
+// ---------------------------------------------------------------------------
+
+/// Build the chat completions request body for either Ollama's OpenAI-compatible
+/// endpoint or Azure OpenAI. When `schema` is `Some`, attaches a
+/// `response_format: json_schema` block so the provider constrains generation
+/// to the supplied JSON Schema. See ADR-011.
+fn build_chat_body(
+    model: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    schema: Option<(&str, &serde_json::Value)>,
+) -> serde_json::Value {
+    let mut body = json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user",   "content": user_prompt },
+        ],
+        "temperature": 0.1,
+    });
+
+    if let Some((name, schema)) = schema {
+        body["response_format"] = json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": name,
+                "schema": schema,
+                "strict": true,
+            },
+        });
+    }
+
+    body
 }
 
 // ---------------------------------------------------------------------------

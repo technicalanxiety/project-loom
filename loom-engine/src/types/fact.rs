@@ -5,6 +5,7 @@
 //! salience) is separated into a derived table that can be recomputed.
 
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -72,8 +73,10 @@ pub struct FactState {
 /// A fact extracted from an LLM response before predicate resolution.
 ///
 /// This is the raw extraction output that feeds into predicate matching
-/// and fact storage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// and fact storage. The `JsonSchema` derive emits the schema that
+/// Ollama's `response_format: json_schema` uses to constrain qwen2.5:14b
+/// output (see ADR-011).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExtractedFact {
     /// Subject entity name as extracted.
     pub subject: String,
@@ -152,7 +155,7 @@ impl std::fmt::Display for EvidenceStrength {
 ///
 /// Used to set `valid_from` and `valid_until` on facts when the LLM
 /// identifies time-bounded relationships.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TemporalMarkers {
     /// When the relationship became valid.
     pub valid_from: Option<DateTime<Utc>>,

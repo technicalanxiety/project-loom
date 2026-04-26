@@ -6,6 +6,7 @@
 //! separated into a derived table that can be recomputed.
 
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -124,8 +125,10 @@ pub struct EntityState {
 /// An entity extracted from an LLM response before resolution.
 ///
 /// This is the raw extraction output that feeds into the 3-pass
-/// resolution algorithm.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// resolution algorithm. The `JsonSchema` derive emits the schema that
+/// Ollama's `response_format: json_schema` uses to constrain qwen2.5:14b
+/// output (see ADR-011).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExtractedEntity {
     /// Entity name as extracted by the LLM.
     pub name: String,

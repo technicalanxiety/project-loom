@@ -26,6 +26,7 @@ import type {
   ParserHealthMetrics,
   PipelineHealthResponse,
   PredicateCandidateSummary,
+  RequeueAllFailedResponse,
   ResolveConflictRequest,
   ResolveConflictResponse,
   ResolvePredicateCandidateRequest,
@@ -233,6 +234,17 @@ export async function resolvePredicateCandidate(
     `/predicates/candidates/${encodeURIComponent(id)}/resolve`,
     request,
   );
+}
+
+/**
+ * Bulk-reset every episode currently in `failed` state back to `pending`.
+ *
+ * Used by the Runtime page's "Retry failed" button after the operator has
+ * fixed the root cause of a failure class. Idempotent — when there are no
+ * failures, returns `{requeued: 0}`.
+ */
+export async function requeueAllFailedEpisodes(): Promise<RequeueAllFailedResponse> {
+  return postJson<RequeueAllFailedResponse>('/episodes/failed/requeue-all', {});
 }
 
 // ---------------------------------------------------------------------------

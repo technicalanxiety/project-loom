@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Bulk "Retry failed" button on the Runtime dashboard
+
+- New `POST /dashboard/api/episodes/failed/requeue-all` endpoint at
+  [loom-engine/src/api/dashboard.rs](loom-engine/src/api/dashboard.rs)
+  resets every episode in `processing_status = 'failed'` back to
+  `pending` in a single UPDATE. Idempotent — returns
+  `{"requeued": <count>}`. Backed by `requeue_all_failed_episodes`
+  in [loom-engine/src/db/episodes.rs](loom-engine/src/db/episodes.rs).
+- New `RetryFailedButton` on the Runtime page
+  ([loom-dashboard/src/pages/RuntimePage.tsx](loom-dashboard/src/pages/RuntimePage.tsx))
+  surfaces in the "Recent failures" section header whenever
+  `failed_episodes > 0`. Click triggers the bulk endpoint; the SSE
+  telemetry stream picks up the count drop on the next sample. The
+  failures section now renders even when the 5-minute sample window
+  is empty but the failed-episode counter is non-zero — operators
+  always have a reachable retry path. Pairs with ADR-011: lowering
+  `EMBED_CHAR_LIMIT` made previously-poison-pill episodes
+  processable, but they still needed an explicit requeue to leave
+  the failed state.
+- Auth follows the existing Caddy-injected bearer pattern (ADR 006);
+  the dashboard fetch needs no client-side token handling.
+
 #### Dashboard visual standardization across all 9 pages
 
 - Apr 2026 redesign delivered in three commits on `main`. The change is
@@ -165,6 +187,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Rust/npm toolchain to deploy.
 
 ### Fixed
+
+#### Pipeline reliability: bounded embedding input + constrained extraction output (ADR 011)
+
+- `EMBED_CHAR_LIMIT` lowered from 30,000 → 16,000 in
+  [loom-engine/src/llm/embeddings.rs](loom-engine/src/llm/embeddings.rs).
+  The previous limit assumed ~4 chars/token (English prose) but Claude
+  Code transcripts contain escaped JSON, base64-encoded images, and
+  long tool-output blobs that tokenize at ~2 chars/token worst case.
+  8192 tokens × 2 chars/token = 16,384 chars → round down to 16,000
+  for safety. Eliminates the recurring `400 "the input length exceeds
+  the context length"` failures from `nomic-embed-text` that were
+  silently parking episodes in `processing_status = 'failed'` and
+  removing them from recall (the `embedding IS NOT NULL` filter at
+  [loom-engine/src/pipeline/online/retrieve.rs](loom-engine/src/pipeline/online/retrieve.rs)
+  excludes them). Episode `content` remains verbatim — the truncation
+  is only what the embedding model sees as input. ADR-005 preserved.
+- `LlmClient::call_llm_with_schema` added at
+  [loom-engine/src/llm/client.rs](loom-engine/src/llm/client.rs).
+  Wraps the existing chat-completions plumbing with a
+  `response_format: {"type": "json_schema", "json_schema": {...}}`
+  block. On Ollama ≥ 0.5 this routes through llama.cpp's GBNF grammar
+  enforcement so the model's sampler can only emit schema-conformant
+  tokens; on Azure OpenAI it hits the OpenAI structured-outputs path.
+  Both `extract_entities` and `extract_facts` now derive their schema
+  via `schemars::schema_for!` from `ExtractionResponse` /
+  `FactExtractionResponse` and pass it to the new method. Eliminates
+  the three observed extraction parse failures (`trailing characters`,
+  `missing field 'entities'`, `response is neither a valid JSON
+  object nor a JSON string`).
+- `schemars = { version = "0.8", features = ["chrono"] }` added to
+  `loom-engine/Cargo.toml`. `JsonSchema` derive added to
+  `ExtractedEntity`, `ExtractedFact`, `TemporalMarkers`,
+  `ExtractionResponse`, `FactExtractionResponse`. The `chrono` feature
+  is required for `DateTime<Utc>` fields on `TemporalMarkers`.
+- `LlmClient::call_llm` (used by `classification.rs`) is unchanged.
+  Classification's fallback-to-`Chat` behavior on parse failure makes
+  schema mode unnecessary on that path.
+- Stale module docstring on `loom-engine/src/llm/extraction.rs`
+  rewritten — referenced "Gemma 4 26B MoE" but the configured
+  extractor on iGPU hosts is `qwen2.5:14b` per ADR-009.
+- Existing `failed`-state episodes do not auto-recover. Operators must
+  hit `POST /dashboard/api/episodes/{id}/requeue` to re-process them
+  under the new logic. Failed-state is operator-controlled by design
+  (ADR-007).
+- ADR 011 documents the design rationale, the bounded-system framing
+  (lower at the input boundary, constrain at the output boundary),
+  and the follow-up work (token-aware embedding truncation via the
+  `tokenizers` crate).
 
 #### Caddy TLS on LAN deployments (`LOOM_HOST` plumbing + SNI fallback)
 

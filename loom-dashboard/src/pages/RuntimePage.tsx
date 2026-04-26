@@ -13,6 +13,8 @@
  * Inline styles are reserved for dynamic geometry — sparkline points, bar
  * widths — that can't live in CSS.
  */
+import { useState } from 'react';
+import { requeueAllFailedEpisodes } from '../api/client';
 import { useTelemetryStream } from '../hooks/useTelemetryStream';
 import {
   cpuTone,
@@ -149,6 +151,51 @@ function SourcePill({ source }: { source: string }) {
       <span className="dot" />
       {source}
     </span>
+  );
+}
+
+// ── Retry-failed button ──────────────────────────────────────────────────────
+
+function RetryFailedButton({ count }: { count: number }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastRequeued, setLastRequeued] = useState<number | null>(null);
+
+  const handleClick = async () => {
+    setSubmitting(true);
+    setError(null);
+    setLastRequeued(null);
+    try {
+      const result = await requeueAllFailedEpisodes();
+      setLastRequeued(result.requeued);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {lastRequeued !== null && !error && (
+        <span style={{ color: 'var(--signal-success)', fontSize: 'var(--text-sm)' }}>
+          {lastRequeued} requeued
+        </span>
+      )}
+      {error && (
+        <span style={{ color: 'var(--signal-error)', fontSize: 'var(--text-sm)' }} title={error}>
+          retry failed
+        </span>
+      )}
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={handleClick}
+        disabled={submitting || count === 0}
+      >
+        {submitting ? 'Requeuing…' : `Retry failed (${count})`}
+      </button>
+    </div>
   );
 }
 
@@ -369,29 +416,40 @@ export function RuntimePage() {
         </section>
       </div>
 
-      {/* Recent failures */}
-      {snap.recent_errors.length > 0 && (
+      {/* Recent failures — section appears whenever any episode is in
+          `failed` state, even if all of them have aged out of the 5-min
+          sample window the table draws from. The button needs to be
+          reachable in either case so the operator can clear the queue. */}
+      {snap.failed_episodes > 0 && (
         <>
           <div className="section-head">
             <h3>
-              Recent failures <span className="count-pill">{snap.recent_errors.length}</span>
+              Recent failures <span className="count-pill">{snap.failed_episodes}</span>
             </h3>
+            <RetryFailedButton count={snap.failed_episodes} />
           </div>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Source</th>
-                <th>Error</th>
-                <th className="cell-num">Episode</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...snap.recent_errors].reverse().map((err) => (
-                <FailureRow key={err.episode_id} err={err} />
-              ))}
-            </tbody>
-          </table>
+          {snap.recent_errors.length > 0 ? (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Source</th>
+                  <th>Error</th>
+                  <th className="cell-num">Episode</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...snap.recent_errors].reverse().map((err) => (
+                  <FailureRow key={err.episode_id} err={err} />
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p style={{ color: 'var(--fg-3)', fontSize: 'var(--text-sm)', margin: '4px 0 0' }}>
+              {snap.failed_episodes} episode{snap.failed_episodes === 1 ? '' : 's'} in `failed`
+              state — all aged out of the recent-failures sample window.
+            </p>
+          )}
         </>
       )}
     </>
