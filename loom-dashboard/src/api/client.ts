@@ -32,6 +32,7 @@ import type {
   ResolvePredicateCandidateRequest,
   ResolvePredicateCandidateResponse,
   RetrievalMetrics,
+  SeedSummary,
 } from '../types';
 
 const BASE_URL = '/dashboard/api';
@@ -264,4 +265,12 @@ export async function getBenchmarkDetail(id: string): Promise<BenchmarkCompariso
 /** Trigger a new benchmark run across all A/B/C conditions. */
 export async function runBenchmark(): Promise<BenchmarkRun> {
   return postJson<BenchmarkRun>('/benchmarks/run', {});
+}
+
+/** Seed the `benchmark` namespace with the engine's embedded corpus.
+ * Idempotent — calling twice on a populated namespace returns
+ * `{inserted: 0, duplicates: <total>}`. Extraction runs asynchronously after
+ * seeding, so the operator must wait before running a benchmark. */
+export async function seedBenchmark(): Promise<SeedSummary> {
+  return postJson<SeedSummary>('/benchmarks/seed', {});
 }

@@ -467,6 +467,18 @@ export interface ConditionSummary {
   avg_latency_ms: number;
 }
 
+/** Result of seeding the `benchmark` namespace via
+ * `POST /dashboard/api/benchmarks/seed`. The two counts always sum to the
+ * embedded seed corpus size (currently 10), so calling the endpoint a second
+ * time on a populated namespace returns `{inserted: 0, duplicates: 10}`. */
+export interface SeedSummary {
+  /** Episodes newly inserted into the namespace by this call. */
+  inserted: number;
+  /** Episodes that already existed (matched by content hash or
+   * source_event_id) and were skipped. */
+  duplicates: number;
+}
+
 /** Full benchmark comparison for the dashboard view. */
 export interface BenchmarkComparison {
   /** The benchmark run metadata. */

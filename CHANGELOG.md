@@ -467,6 +467,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+#### One-click "Seed benchmark data" button on the Benchmark page
+
+- New `POST /dashboard/api/benchmarks/seed` endpoint at
+  [loom-engine/src/api/dashboard.rs](loom-engine/src/api/dashboard.rs).
+  Posts the engine's embedded seed corpus (10 documents from
+  `seed/benchmark/`) into the `benchmark` namespace as
+  `user_authored_seed` episodes. Idempotent — repeat calls match on
+  content hash or `(source, source_event_id)` and return
+  `{inserted: 0, duplicates: <total>}`.
+- Seed corpus is now embedded into the engine binary via
+  `include_str!` ([loom-engine/src/pipeline/benchmark.rs](loom-engine/src/pipeline/benchmark.rs)),
+  so a fresh deploy ships with everything it needs to populate the
+  namespace from the dashboard. The on-disk `seed/benchmark/` files
+  remain authoritative for the CLI flow and as documentation.
+- New "Seed benchmark data" button on the Benchmark page
+  ([loom-dashboard/src/pages/BenchmarkPage.tsx](loom-dashboard/src/pages/BenchmarkPage.tsx))
+  surfaces in the page header next to "Run new benchmark." A status
+  toast reports inserted/duplicate counts and reminds the operator to
+  wait for extraction to settle before running the benchmark. The
+  empty-runs and empty-namespace copy were updated to point at the
+  button instead of the CLI.
+- Three new unit tests anchor the seed corpus to the task suite:
+  `seed_corpus_matches_task_count`, `seed_corpus_files_are_non_empty`,
+  and `seed_corpus_mentions_expected_entities` — the last one walks
+  every `expected_entities` value in `benchmark_tasks()` and asserts
+  it appears somewhere in the embedded markdown. Drift between seed
+  prose and ground truth fails at build time.
+
 #### Benchmark conditions are now apples-to-apples (every condition calls the LLM)
 
 - Condition A is no longer a hardcoded zero stub. The bare query is sent to

@@ -810,6 +810,158 @@ async fn run_condition_c(
 }
 
 // ---------------------------------------------------------------------------
+// Seed corpus (embedded at compile time)
+// ---------------------------------------------------------------------------
+
+/// One markdown document from `seed/benchmark/` — content embedded at compile
+/// time via `include_str!` so the engine ships with the corpus and doesn't
+/// need a runtime filesystem path. The `event_id` is stable across calls so
+/// the (`source`, `source_event_id`) unique constraint makes seeding
+/// idempotent — clicking "Seed benchmark data" twice is harmless.
+struct SeedDoc {
+    /// Stable identifier used as `source_event_id`. Must not change between
+    /// releases without resetting the benchmark namespace.
+    event_id: &'static str,
+    /// Verbatim markdown content. ADR-005: do not summarise.
+    content: &'static str,
+}
+
+const SEED_DOCS: &[SeedDoc] = &[
+    SeedDoc {
+        event_id: "seed:benchmark/01-debug-auth-failure.md",
+        content: include_str!("../../../seed/benchmark/01-debug-auth-failure.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/02-debug-memory-leak.md",
+        content: include_str!("../../../seed/benchmark/02-debug-memory-leak.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/03-arch-service-topology.md",
+        content: include_str!("../../../seed/benchmark/03-arch-service-topology.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/04-arch-data-flow.md",
+        content: include_str!("../../../seed/benchmark/04-arch-data-flow.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/05-compliance-gdpr.md",
+        content: include_str!("../../../seed/benchmark/05-compliance-gdpr.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/06-compliance-access-review.md",
+        content: include_str!("../../../seed/benchmark/06-compliance-access-review.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/07-writing-api-docs.md",
+        content: include_str!("../../../seed/benchmark/07-writing-api-docs.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/08-writing-runbook.md",
+        content: include_str!("../../../seed/benchmark/08-writing-runbook.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/09-chat-project-status.md",
+        content: include_str!("../../../seed/benchmark/09-chat-project-status.md"),
+    },
+    SeedDoc {
+        event_id: "seed:benchmark/10-chat-team-ownership.md",
+        content: include_str!("../../../seed/benchmark/10-chat-team-ownership.md"),
+    },
+];
+
+/// Result of a `seed_benchmark_namespace` call. `inserted + duplicates` always
+/// equals `SEED_DOCS.len()` on success — the dashboard uses these counts to
+/// tell the operator "I just added 10 episodes" vs "they were already there".
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SeedSummary {
+    /// Episodes newly inserted into the `benchmark` namespace.
+    pub inserted: usize,
+    /// Episodes that already existed (matched by content hash or
+    /// `source_event_id`) and were skipped.
+    pub duplicates: usize,
+}
+
+/// SHA-256 content hash, hex-encoded. Mirrors the helper in `api/rest.rs`
+/// rather than coupling the two modules — both rely on the same scheme so
+/// cross-source dedup keeps working.
+fn content_hash(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+/// Seed the `benchmark` namespace with the embedded corpus. Idempotent —
+/// rerunning is a no-op once the corpus has been seeded once. Episodes are
+/// posted as `user_authored_seed` (provenance coefficient 0.8) so they rank
+/// the same as content posted via `cli/loom-seed.py`.
+///
+/// The extraction worker will pick the new episodes up on its next pending
+/// poll; entities and facts won't be available until extraction settles —
+/// minutes on iGPU. Operators see this on the Compilations page.
+pub async fn seed_benchmark_namespace(
+    pool: &PgPool,
+) -> Result<SeedSummary, BenchmarkError> {
+    use crate::db::episodes::{insert_episode, NewEpisode};
+
+    let now = Utc::now();
+    let mut inserted = 0usize;
+    let mut duplicates = 0usize;
+
+    for doc in SEED_DOCS {
+        let hash = content_hash(doc.content);
+
+        // Pre-check covers both dedup keys POST /api/learn uses: matching the
+        // (source, source_event_id) pair (re-seed after interrupted run) or
+        // matching the content_hash within the namespace (already seeded via
+        // CLI with the same file).
+        let already_present: bool = sqlx::query_scalar(
+            "SELECT EXISTS(\
+               SELECT 1 FROM loom_episodes \
+               WHERE namespace = 'benchmark' \
+                 AND (content_hash = $1 \
+                      OR (source = 'seed' AND source_event_id = $2))\
+             )",
+        )
+        .bind(&hash)
+        .bind(doc.event_id)
+        .fetch_one(pool)
+        .await?;
+
+        if already_present {
+            duplicates += 1;
+            continue;
+        }
+
+        let new_ep = NewEpisode {
+            source: "seed".to_string(),
+            source_id: None,
+            source_event_id: Some(doc.event_id.to_string()),
+            content: doc.content.to_string(),
+            content_hash: hash,
+            occurred_at: now,
+            namespace: "benchmark".to_string(),
+            metadata: None,
+            participants: None,
+            ingestion_mode: "user_authored_seed".to_string(),
+            parser_version: None,
+            parser_source_schema: None,
+        };
+
+        insert_episode(pool, &new_ep).await.map_err(|e| match e {
+            crate::db::episodes::EpisodeError::Sqlx(err) => BenchmarkError::Database(err),
+        })?;
+        inserted += 1;
+    }
+
+    tracing::info!(
+        inserted, duplicates, total = SEED_DOCS.len(),
+        "benchmark seed corpus posted to namespace=benchmark"
+    );
+    Ok(SeedSummary { inserted, duplicates })
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -1122,6 +1274,59 @@ mod tests {
     fn all_tasks_use_benchmark_namespace() {
         for task in benchmark_tasks() {
             assert_eq!(task.namespace, "benchmark", "task {} uses wrong namespace", task.name);
+        }
+    }
+
+    #[test]
+    fn seed_corpus_matches_task_count() {
+        // Each task in `benchmark_tasks()` has a corresponding seed file.
+        // `include_str!` resolves at compile time; this test catches a
+        // missing or unreadable file (which would have failed compilation)
+        // and a desynchronisation between SEED_DOCS and the task list.
+        assert_eq!(
+            SEED_DOCS.len(),
+            benchmark_tasks().len(),
+            "seed corpus size must match benchmark task count"
+        );
+    }
+
+    #[test]
+    fn seed_corpus_files_are_non_empty() {
+        for doc in SEED_DOCS {
+            assert!(
+                !doc.content.trim().is_empty(),
+                "seed file {} embedded as empty content",
+                doc.event_id
+            );
+            assert!(
+                doc.content.len() > 200,
+                "seed file {} too short ({} chars) for meaningful extraction",
+                doc.event_id,
+                doc.content.len()
+            );
+        }
+    }
+
+    #[test]
+    fn seed_corpus_mentions_expected_entities() {
+        // The seed corpus is supposed to make B and C return real signal —
+        // every expected entity in `benchmark_tasks()` should appear in at
+        // least one seed file. Catches drift between seed prose and the
+        // ground-truth list when either side is edited.
+        let combined: String = SEED_DOCS
+            .iter()
+            .map(|d| d.content.to_lowercase())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for task in benchmark_tasks() {
+            for entity in &task.expected_entities {
+                assert!(
+                    combined.contains(&entity.to_lowercase()),
+                    "expected entity {:?} (task {}) not found in any seed file",
+                    entity,
+                    task.name
+                );
+            }
         }
     }
 

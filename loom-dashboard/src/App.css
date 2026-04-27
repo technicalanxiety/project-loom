@@ -197,6 +197,14 @@ body {
   gap: var(--space-1);
 }
 
+.page-header-actions {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-2);
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
 .page-header h2 {
   font-family: var(--font-sans);
   font-size: 28px;
@@ -1363,6 +1371,19 @@ select.form-control {
   background: rgba(255, 255, 255, 0.5);
   padding: 1px 5px;
   border-radius: 3px;
+}
+
+/* ---- Benchmarks: seed-result toast ------------------------ */
+
+.bench-seed-result {
+  background: var(--moss-100);
+  border: 1px solid var(--moss-300);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--moss-900);
+  line-height: 1.55;
 }
 
 /* ---- Benchmarks: expandable per-task rows ----------------- */

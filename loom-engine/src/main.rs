@@ -239,6 +239,10 @@ async fn main() {
             post(dashboard::handle_run_benchmark),
         )
         .route(
+            "/dashboard/api/benchmarks/seed",
+            post(dashboard::handle_seed_benchmark),
+        )
+        .route(
             "/dashboard/api/benchmarks/{id}",
             get(dashboard::handle_benchmark_detail),
         )

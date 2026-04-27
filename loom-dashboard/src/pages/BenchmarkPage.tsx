@@ -18,7 +18,7 @@
  */
 import type React from 'react';
 import { Fragment, useCallback, useState } from 'react';
-import { getBenchmarkDetail, getBenchmarkRuns, runBenchmark } from '../api/client';
+import { getBenchmarkDetail, getBenchmarkRuns, runBenchmark, seedBenchmark } from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { relativeTime } from '../lib/thresholds';
 import type {
@@ -27,6 +27,7 @@ import type {
   BenchmarkTaskDetails,
   BenchmarkTaskResult,
   ConditionSummary,
+  SeedSummary,
 } from '../types';
 
 const CONDITION_LABELS: Record<string, string> = {
@@ -114,9 +115,10 @@ const EmptyNamespaceHint: React.FC<EmptyHintProps> = ({ comparison }) => {
     <div className="bench-empty-hint">
       <strong>Looks like the benchmark namespace is empty.</strong> Conditions B and C compiled
       almost no context (under 50 tokens on average — typical for the empty JSON wrapper), so they
-      have nothing extra to feed the LLM and should be expected to score similarly to A. Seed it
-      with <code>cli/loom-seed.py --namespace benchmark seed/benchmark/</code> and re-run after
-      extraction settles.
+      have nothing extra to feed the LLM and should be expected to score similarly to A. Click{' '}
+      <strong>Seed benchmark data</strong> at the top of the page, wait for extraction to finish on
+      the Compilations page, then re-run. (Or post the corpus from the CLI:{' '}
+      <code>cli/loom-seed.py --namespace benchmark seed/benchmark/</code>.)
     </div>
   );
 };
@@ -425,6 +427,9 @@ export const BenchmarkPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [runningBenchmark, setRunningBenchmark] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<SeedSummary | null>(null);
+  const [seedError, setSeedError] = useState<string | null>(null);
 
   const handleSelectRun = useCallback(async (run: BenchmarkRun) => {
     setDetailLoading(true);
@@ -455,6 +460,20 @@ export const BenchmarkPage: React.FC = () => {
     }
   }, [refetch]);
 
+  const handleSeed = useCallback(async () => {
+    setSeeding(true);
+    setSeedError(null);
+    try {
+      const summary = await seedBenchmark();
+      setSeedResult(summary);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to seed benchmark namespace';
+      setSeedError(message);
+    } finally {
+      setSeeding(false);
+    }
+  }, []);
+
   return (
     <>
       <div className="page-header">
@@ -466,15 +485,47 @@ export const BenchmarkPage: React.FC = () => {
             retrieval vs. <strong>Full Loom</strong> — precision, tokens, success rate, latency.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={handleRunBenchmark}
-          disabled={runningBenchmark}
-        >
-          {runningBenchmark ? 'Running…' : 'Run new benchmark'}
-        </button>
+        <div className="page-header-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSeed}
+            disabled={seeding}
+            title="Post the embedded benchmark seed corpus to the `benchmark` namespace. Safe to click multiple times — duplicates are skipped."
+          >
+            {seeding ? 'Seeding…' : 'Seed benchmark data'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleRunBenchmark}
+            disabled={runningBenchmark}
+          >
+            {runningBenchmark ? 'Running…' : 'Run new benchmark'}
+          </button>
+        </div>
       </div>
+
+      {seedResult && (
+        <div className="bench-seed-result" role="status">
+          <strong>Seed corpus posted.</strong>{' '}
+          {seedResult.inserted > 0 ? (
+            <>
+              {seedResult.inserted} new episode{seedResult.inserted === 1 ? '' : 's'} queued for
+              extraction
+              {seedResult.duplicates > 0 && <>, {seedResult.duplicates} already present</>}. Wait
+              for extraction to complete (visible on the Compilations or Entities page) before
+              running the benchmark — graph and fact retrieval need facts to be extracted first.
+            </>
+          ) : (
+            <>
+              All {seedResult.duplicates} seed episode
+              {seedResult.duplicates === 1 ? '' : 's'} already present. Nothing changed.
+            </>
+          )}
+        </div>
+      )}
+      {seedError && <div className="error">{seedError}</div>}
 
       {loading && <div className="loading">Loading runs…</div>}
       {error && <div className="error">{error}</div>}
@@ -490,8 +541,10 @@ export const BenchmarkPage: React.FC = () => {
             <div className="empty-state">
               <h3>No benchmark runs yet</h3>
               <p>
-                Click <strong>Run new benchmark</strong> to evaluate the three conditions across the
-                current task suite.
+                First time? Click <strong>Seed benchmark data</strong> to load the embedded corpus
+                into the <code>benchmark</code> namespace, wait for extraction to finish on the
+                Compilations page, then click <strong>Run new benchmark</strong> to evaluate the
+                three conditions.
               </p>
             </div>
           ) : (

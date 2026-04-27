@@ -2147,6 +2147,25 @@ pub async fn handle_run_benchmark(
     Ok(Json(run))
 }
 
+/// Seed the `benchmark` namespace with the embedded corpus. Idempotent — if
+/// the namespace is already populated, every document is reported as a
+/// duplicate and nothing changes. The extraction worker picks up new episodes
+/// asynchronously; the dashboard tells the operator to wait for that before
+/// running the benchmark.
+pub async fn handle_seed_benchmark(
+    State(state): State<AppState>,
+) -> Result<Json<crate::pipeline::benchmark::SeedSummary>, DashboardError> {
+    let summary = crate::pipeline::benchmark::seed_benchmark_namespace(&state.pools.offline)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+    tracing::info!(
+        inserted = summary.inserted,
+        duplicates = summary.duplicates,
+        "benchmark seed corpus posted"
+    );
+    Ok(Json(summary))
+}
+
 // ---------------------------------------------------------------------------
 // GET /dashboard/api/metrics/parser-health
 // ---------------------------------------------------------------------------
