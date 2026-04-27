@@ -467,6 +467,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+#### Benchmark conditions are now apples-to-apples (every condition calls the LLM)
+
+- Condition A is no longer a hardcoded zero stub. The bare query is sent to
+  the chat LLM (`classification_model`) with no retrieved context; the
+  answer reflects what the model knows from training alone. This is the
+  lower bound A is supposed to be.
+- Conditions B and C now also call the LLM with the compiled context as a
+  system message. The headline `precision` column is therefore the same
+  kind of number across the row: fraction of `expected_entities` mentioned
+  in the LLM answer, comparable A vs B vs C.
+- New predicate-aware retrieval-side metric in `details.retrieval_precision`
+  (B and C only): average of entity recall and predicate recall over the
+  candidates that survived the compilation budget. Entity names are
+  hydrated by UUID from `loom_entities` in a single batch query, so warm-
+  tier facts now contribute — the previous substring-on-JSON metric saw
+  UUIDs and always returned zero. `details` also carries `entity_recall`,
+  `predicate_recall`, `answer`, `candidates_considered` for diagnosis.
+- `task_success` is now `precision > 0` (an expected entity made it into
+  the answer) rather than "wrapper compiled".
+- The dashboard's Benchmark page picks up: a "How to read" explainer panel
+  above the cards, an empty-namespace hint when avg tokens < 50 across B
+  and C, and click-to-expand per-task rows that show the LLM answer and
+  the retrieval-side metrics for every condition. `BenchmarkTaskResult`
+  gained an optional `details: BenchmarkTaskDetails` field.
+- New seed corpus at [seed/benchmark/](seed/benchmark/) — 10 markdown
+  documents, one per benchmark task, that mention each task's expected
+  entities and use natural-language relations the extraction LLM should
+  normalise to the expected predicates. Drive with
+  `cli/loom-seed.py --namespace benchmark seed/benchmark/`.
+- `precision_from_context` removed; replaced with `entity_match_fraction`
+  (text-side) and `compute_retrieval_score` (structured, predicate-aware,
+  hydrates names). The four old precision unit tests were updated to the
+  new helper; `condition_a_always_zero` was deleted (no longer accurate);
+  added `all_tasks_have_expected_entities_and_facts` to catch missing
+  ground-truth at build time. 619 lib tests pass.
+- No DB migration: the existing `precision` column carries answer
+  precision and retrieval-side metrics live in the `details` JSONB.
+
 #### Native Ollama is now the default (ADR 002 amendment)
 
 - `.env.example` default `OLLAMA_URL=http://host.docker.internal:11434`

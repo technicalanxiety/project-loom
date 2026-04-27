@@ -136,6 +136,7 @@ burned once by mocked tests passing while a prod migration was broken.
 | Bootstrap parsers (vendor imports) | `bootstrap/` |
 | Client templates (configs, hooks, instructions) | `templates/` |
 | Seed CLI | `cli/loom-seed.py` |
+| Benchmark seed corpus | `seed/benchmark/` |
 | Specs | `.kiro/specs/loom-memory-compiler/` |
 
 ## When in doubt
@@ -165,3 +166,11 @@ burned once by mocked tests passing while a prod migration was broken.
   [ADR-010](docs/adr/010-streaming-telemetry.md). The SSE stream at
   `/dashboard/api/stream/telemetry` pushes a `TelemetrySnapshot` every
   second from an in-process ring buffer — no time-series store.
+- **Touching the benchmark?** All three conditions (A/B/C) call the
+  chat LLM so the `precision` column is comparable across the row —
+  it measures fraction of expected entities mentioned in the answer.
+  B and C also record `details.retrieval_precision` (predicate-aware,
+  with hydrated entity names so warm-tier facts contribute). Run
+  `cli/loom-seed.py --namespace benchmark seed/benchmark/` and let
+  extraction settle before reading the cards; an empty `benchmark`
+  namespace makes B/C indistinguishable from A.

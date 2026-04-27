@@ -399,6 +399,39 @@ export interface BenchmarkRun {
   status: string;
 }
 
+/** Diagnostic blob returned in `BenchmarkTaskResult.details`.
+ *
+ * Every condition writes the original `query`. Conditions B and C add
+ * retrieval-side metrics (`retrieval_precision`, `entity_recall`,
+ * `predicate_recall`) and the LLM `answer`. A failed LLM call sets
+ * `error` instead of `answer`. Treat any field as optional — the engine
+ * may add new diagnostics over time. */
+export interface BenchmarkTaskDetails {
+  query?: string;
+  condition_description?: string;
+  /** LLM response text. Populated when the chat call succeeded. */
+  answer?: string;
+  /** Fraction of expected entities mentioned in `answer`. Equal to the
+   * top-level `precision` field on the result row; duplicated here for
+   * symmetry with the retrieval-side metrics. */
+  answer_precision?: number;
+  /** Predicate-aware retrieval precision: average of entity recall and
+   * predicate recall over the items that survived the compilation budget.
+   * B and C only. */
+  retrieval_precision?: number;
+  entity_recall?: number;
+  predicate_recall?: number;
+  candidates_found?: number;
+  candidates_selected?: number;
+  candidates_considered?: number;
+  task_class?: string;
+  profiles?: string[];
+  /** Set when an embedding, retrieval, or LLM call errored. The condition
+   * still recorded what it could; `answer` will be absent. */
+  error?: string;
+  [key: string]: unknown;
+}
+
 /** A single benchmark task result for one condition. */
 export interface BenchmarkTaskResult {
   /** Result identifier. */
@@ -407,14 +440,19 @@ export interface BenchmarkTaskResult {
   task_name: string;
   /** Condition tested: A, B, or C. */
   condition: string;
-  /** Precision: relevant retrieved / total retrieved. */
+  /** Answer-side precision: fraction of the task's expected entities
+   * mentioned in the LLM's response. Comparable across A/B/C. */
   precision: number;
-  /** Number of tokens in the compiled context. */
+  /** Tokens in the compiled context (input cost). 0 for condition A,
+   * which has no compiled context. */
   token_count: number;
-  /** Whether the task was considered successful. */
+  /** Whether the task was considered successful. True when at least one
+   * expected entity appears in the LLM answer. */
   task_success: boolean;
-  /** End-to-end latency in milliseconds. */
+  /** End-to-end latency in milliseconds, including LLM call. */
   latency_ms: number;
+  /** Diagnostic payload — see `BenchmarkTaskDetails`. */
+  details?: BenchmarkTaskDetails;
 }
 
 /** Aggregated metrics for a single benchmark condition. */

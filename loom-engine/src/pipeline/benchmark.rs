@@ -1,26 +1,43 @@
 //! Benchmark evaluation runner for A/B/C condition comparison.
 //!
 //! Implements the benchmark evaluation protocol (Requirement 47) by running
-//! 10+ benchmark tasks across three conditions:
-//! - **Condition A**: No memory (baseline) — returns empty context immediately.
-//! - **Condition B**: Episode-only retrieval — embeds the query, runs
-//!   `episode_recall`, weights, ranks, and compiles. No LLM classification.
-//! - **Condition C**: Full Loom pipeline — embeds the query, runs all retrieval
-//!   profiles for the task class (inferred from the task name prefix), weights,
-//!   ranks, and compiles. Includes hot-tier items.
+//! 10+ benchmark tasks across three conditions, each of which actually calls
+//! the LLM so the cards measure something the operator can act on:
 //!
-//! All three conditions execute against the real database and the real embedding
-//! model. If the `benchmark` namespace has no data, B and C will produce empty
-//! compilations — which is the correct result, not a bug.
+//! - **Condition A** — no memory baseline. The query is sent to the LLM with
+//!   no retrieved context; the answer reflects whatever the model knows from
+//!   training alone. This is the lower bound: how well does the LLM do without
+//!   Loom? See ADR docs for context — until this rewrite, A was a hardcoded
+//!   zero stub which made the comparison meaningless.
+//! - **Condition B** — episode-only retrieval. Embed the query, run
+//!   `episode_recall`, weight, rank, compile (no hot tier), pass the compiled
+//!   context to the LLM, then measure what the LLM produced.
+//! - **Condition C** — full Loom pipeline. Same as B but runs every retrieval
+//!   profile for the inferred task class, includes hot tier, and the warmer
+//!   weighting/ranking that production uses.
 //!
-//! **Precision** is measured as the fraction of `expected_entities` whose names
-//! appear (case-insensitive substring) in the compiled context package. This is
-//! a text-presence metric, not an LLM judge. It is conservative: entities that
-//! appear in retrieved facts but under a different form will be missed.
+//! Two precision metrics are recorded per condition:
 //!
-//! **Task success** is defined as: at least one token was compiled (i.e. the
-//! pipeline returned non-empty context). For condition A this is always false.
+//! - `precision` (the headline number, stored as the `precision` column) =
+//!   **answer precision**: fraction of `expected_entities` mentioned in the
+//!   LLM's answer. Comparable across A/B/C because all three call the LLM.
+//! - `details.retrieval_precision` (B and C only) = **predicate-aware
+//!   retrieval precision**: average of (entity recall) and (predicate recall)
+//!   across the retrieved candidate set. Names are hydrated from
+//!   `loom_entities` so warm-tier facts contribute properly — the previous
+//!   substring-on-JSON metric saw UUIDs and always returned zero for warm
+//!   facts.
+//!
+//! `task_success` = answer precision > 0 (at least one expected entity
+//! mentioned). `token_count` = compiled-context input tokens (0 for A,
+//! whatever the compiler emitted for B/C).
+//!
+//! Empty `benchmark` namespace? B and C will compile the empty wrapper and
+//! the LLM will be asked to answer with no context — the answer will likely
+//! score similarly to A. The fix is to seed the namespace; see
+//! `seed/benchmark/`.
 
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use chrono::Utc;
@@ -34,8 +51,13 @@ use crate::db::pool::DbPools;
 use crate::llm::client::LlmClient;
 use crate::llm::embeddings;
 use crate::pipeline::online::{
-    compile::{self, CompilationInput, DEFAULT_WARM_TIER_BUDGET, HotEntity, HotFact, HotTierItem},
-    rank, retrieve, weight,
+    compile::{
+        self, CompilationInput, DEFAULT_WARM_TIER_BUDGET, HotEntity, HotFact, HotTierItem,
+        HotTierPayload,
+    },
+    rank::{self, RankedCandidate},
+    retrieve::{self, CandidatePayload},
+    weight,
 };
 use crate::pipeline::online::retrieve::MemoryType;
 use crate::types::benchmark::{
@@ -164,17 +186,204 @@ fn task_class_from_name(name: &str) -> TaskClass {
     }
 }
 
-/// Fraction of `expected_entities` whose names appear in the compiled context.
-fn precision_from_context(context: &str, expected_entities: &[String]) -> f64 {
+/// Fraction of `expected_entities` whose names appear in `text`. Used for the
+/// answer-side metric across all three conditions and as the entity-recall
+/// component of the retrieval-side metric.
+fn entity_match_fraction(text: &str, expected_entities: &[String]) -> f64 {
     if expected_entities.is_empty() {
         return 0.0;
     }
-    let ctx = context.to_lowercase();
+    let lc = text.to_lowercase();
     let matched = expected_entities
         .iter()
-        .filter(|e| ctx.contains(&e.to_lowercase()))
+        .filter(|e| lc.contains(&e.to_lowercase()))
         .count();
     matched as f64 / expected_entities.len() as f64
+}
+
+/// Predicate-aware retrieval score for B and C.
+#[derive(Debug, Clone)]
+struct RetrievalScore {
+    /// Fraction of `expected_entities` found across the hydrated retrieval set
+    /// (hot tier identity/facts + warm-tier facts with hydrated names + episode
+    /// content + graph entity names).
+    entity_recall: f64,
+    /// Fraction of `expected_facts` predicates present in the retrieved set
+    /// (hot-tier facts + warm-tier fact predicates + graph predicates).
+    predicate_recall: f64,
+    /// Average of the two — the headline retrieval precision number.
+    combined: f64,
+    /// Number of retrieved warm-tier candidates considered (after compile-time
+    /// budget filtering). Useful for diagnosing empty-namespace runs in
+    /// `details`.
+    candidates_considered: usize,
+}
+
+/// Compute predicate-aware retrieval precision over the items that survived
+/// the compilation budget. Hydrates entity names by UUID so warm-tier facts
+/// can contribute to entity recall — the previous substring-on-JSON metric
+/// saw UUIDs and always returned zero for warm facts.
+async fn compute_retrieval_score(
+    pool: &PgPool,
+    namespace: &str,
+    selected_ids: &[Uuid],
+    ranked: &[RankedCandidate],
+    hot_items: &[HotTierItem],
+    expected_entities: &[String],
+    expected_facts: &[String],
+) -> RetrievalScore {
+    let selected: HashSet<Uuid> = selected_ids.iter().copied().collect();
+    let survived: Vec<&RankedCandidate> = ranked
+        .iter()
+        .filter(|rc| selected.contains(&rc.candidate.id))
+        .collect();
+
+    // Collect entity UUIDs referenced by surviving fact candidates so we can
+    // hydrate them in a single batch query.
+    let mut entity_ids: HashSet<Uuid> = HashSet::new();
+    for rc in &survived {
+        if let CandidatePayload::Fact(f) = &rc.candidate.payload {
+            entity_ids.insert(f.subject_id);
+            entity_ids.insert(f.object_id);
+        }
+    }
+
+    let names: HashMap<Uuid, String> = if entity_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let ids_vec: Vec<Uuid> = entity_ids.into_iter().collect();
+        match sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT id, name FROM loom_entities WHERE id = ANY($1) AND namespace = $2 AND deleted_at IS NULL",
+        )
+        .bind(&ids_vec)
+        .bind(namespace)
+        .fetch_all(pool)
+        .await
+        {
+            Ok(rows) => rows.into_iter().collect(),
+            Err(e) => {
+                tracing::warn!(error = %e, "benchmark: entity name hydration failed");
+                HashMap::new()
+            }
+        }
+    };
+
+    let mut entity_corpus = String::new();
+    let mut predicates: HashSet<String> = HashSet::new();
+
+    // Hot tier: facts already carry name strings; entity payload contributes
+    // its name + summary to the identity corpus.
+    for item in hot_items {
+        match &item.payload {
+            HotTierPayload::Fact(f) => {
+                entity_corpus.push_str(&f.subject);
+                entity_corpus.push(' ');
+                entity_corpus.push_str(&f.object);
+                entity_corpus.push(' ');
+                predicates.insert(f.predicate.clone());
+            }
+            HotTierPayload::Entity(e) => {
+                entity_corpus.push_str(&e.name);
+                entity_corpus.push(' ');
+                if let Some(s) = &e.summary {
+                    entity_corpus.push_str(s);
+                    entity_corpus.push(' ');
+                }
+            }
+            HotTierPayload::Procedure(_) => {}
+        }
+    }
+
+    // Warm tier: hydrate fact subject/object names; episodes contribute their
+    // verbatim content; graph candidates carry entity_name and an optional
+    // predicate.
+    for rc in &survived {
+        match &rc.candidate.payload {
+            CandidatePayload::Fact(f) => {
+                if let Some(n) = names.get(&f.subject_id) {
+                    entity_corpus.push_str(n);
+                    entity_corpus.push(' ');
+                }
+                if let Some(n) = names.get(&f.object_id) {
+                    entity_corpus.push_str(n);
+                    entity_corpus.push(' ');
+                }
+                predicates.insert(f.predicate.clone());
+            }
+            CandidatePayload::Episode(ep) => {
+                entity_corpus.push_str(&ep.content);
+                entity_corpus.push(' ');
+            }
+            CandidatePayload::Graph(g) => {
+                entity_corpus.push_str(&g.entity_name);
+                entity_corpus.push(' ');
+                if let Some(p) = &g.predicate {
+                    predicates.insert(p.clone());
+                }
+            }
+            CandidatePayload::Procedure(_) => {}
+        }
+    }
+
+    let entity_recall = entity_match_fraction(&entity_corpus, expected_entities);
+
+    let predicates_lc: HashSet<String> = predicates.iter().map(|p| p.to_lowercase()).collect();
+    let predicate_recall = if expected_facts.is_empty() {
+        0.0
+    } else {
+        let matched = expected_facts
+            .iter()
+            .filter(|p| predicates_lc.contains(&p.to_lowercase()))
+            .count();
+        matched as f64 / expected_facts.len() as f64
+    };
+
+    let combined = (entity_recall + predicate_recall) / 2.0;
+    RetrievalScore {
+        entity_recall,
+        predicate_recall,
+        combined,
+        candidates_considered: survived.len(),
+    }
+}
+
+/// System prompt for benchmark queries. Identical for all three conditions
+/// except that A omits the "Context" line — keeps the model's prior behavior
+/// constant so we are measuring the marginal effect of retrieved context.
+fn build_system_prompt(context: Option<&str>) -> String {
+    let base = "You are a technical expert assistant. Answer the user's question in 1-3 \
+                sentences. When relevant systems, services, modules, projects, or teams \
+                are involved, mention them by their proper names.";
+    match context {
+        Some(ctx) if !ctx.is_empty() => format!(
+            "{base} Use only the JSON context below; if it does not answer the question, \
+             say so plainly without inventing names.\n\nContext:\n{ctx}"
+        ),
+        _ => format!(
+            "{base} If you do not know specific named systems for this question, say so \
+             plainly rather than inventing names."
+        ),
+    }
+}
+
+/// Call the LLM and return the answer as a plain string. Errors are surfaced
+/// to the caller so the condition runner can record them in `details` while
+/// keeping the run going.
+async fn ask_llm(
+    llm: &LlmClient,
+    config: &AppConfig,
+    context: Option<&str>,
+    query: &str,
+) -> Result<String, crate::llm::client::LlmError> {
+    let system = build_system_prompt(context);
+    let resp = llm
+        .call_llm(&config.llm.classification_model, &system, query)
+        .await?;
+    let text = match resp {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    };
+    Ok(text)
 }
 
 /// Warm-tier token budget for the given namespace, falling back to the default.
@@ -280,24 +489,58 @@ async fn fetch_hot_tier(pool: &PgPool, namespace: &str) -> Vec<HotTierItem> {
 // Condition runners
 // ---------------------------------------------------------------------------
 
+/// Condition runner result. `precision` is answer-side; `details` carries the
+/// full diagnostic blob including retrieval-side metrics for B/C.
 type CondResult = (f64, i32, bool, i32, serde_json::Value);
 
-/// Condition A: no memory. Returns immediately with empty context.
-fn run_condition_a(task: &BenchmarkTask) -> CondResult {
+/// Condition A: no memory. Sends the bare query to the LLM and measures
+/// whether the model mentions expected entities purely from training-data
+/// recall. This is the lower bound that B and C are compared against.
+async fn run_condition_a(
+    task: &BenchmarkTask,
+    llm_client: &LlmClient,
+    config: &AppConfig,
+) -> CondResult {
+    let start = Instant::now();
+
+    let answer = match ask_llm(llm_client, config, None, &task.query).await {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                0.0,
+                0,
+                false,
+                start.elapsed().as_millis() as i32,
+                json!({
+                    "query": task.query,
+                    "condition_description": "No memory baseline — LLM-only",
+                    "error": format!("llm: {e}"),
+                }),
+            );
+        }
+    };
+
+    let latency = start.elapsed().as_millis() as i32;
+    let precision = entity_match_fraction(&answer, &task.expected_entities);
+    let success = precision > 0.0;
+
     (
-        0.0,
-        0,
-        false,
-        0,
+        precision,
+        0, // No compiled context — zero input-context tokens.
+        success,
+        latency,
         json!({
             "query": task.query,
-            "condition_description": "No memory baseline — context always empty",
+            "condition_description": "No memory baseline — LLM-only",
+            "answer": answer,
+            "answer_precision": precision,
         }),
     )
 }
 
-/// Condition B: episode-only retrieval. Embeds the query, runs the
-/// `episode_recall` profile, weights, ranks, and compiles. No hot tier.
+/// Condition B: episode-only retrieval + LLM. Embeds the query, runs
+/// `episode_recall`, compiles a context with no hot tier, then asks the LLM
+/// using that context.
 async fn run_condition_b(
     task: &BenchmarkTask,
     pool: &PgPool,
@@ -346,32 +589,83 @@ async fn run_condition_b(
         format: OutputFormat::Compact,
         warm_tier_budget: warm_budget(pool, &task.namespace).await,
         hot_tier_items: vec![],
-        ranked_candidates: ranked,
+        ranked_candidates: ranked.clone(),
     };
 
     let result = compile::compile_package(input);
-    let latency = start.elapsed().as_millis() as i32;
-    let precision = precision_from_context(&result.package.context_package, &task.expected_entities);
     let token_count = result.package.token_count as i32;
+
+    let selected_ids: Vec<Uuid> = result.selected_items.iter().map(|s| s.id).collect();
+    let retrieval = compute_retrieval_score(
+        pool,
+        &task.namespace,
+        &selected_ids,
+        &ranked,
+        &[],
+        &task.expected_entities,
+        &task.expected_facts,
+    )
+    .await;
+
+    let answer = match ask_llm(
+        llm_client,
+        config,
+        Some(&result.package.context_package),
+        &task.query,
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => {
+            let latency = start.elapsed().as_millis() as i32;
+            return (
+                0.0,
+                token_count,
+                false,
+                latency,
+                json!({
+                    "query": task.query,
+                    "condition_description": "Episode-only retrieval",
+                    "candidates_found": candidates_found,
+                    "candidates_selected": result.selected_items.len(),
+                    "retrieval_precision": retrieval.combined,
+                    "entity_recall": retrieval.entity_recall,
+                    "predicate_recall": retrieval.predicate_recall,
+                    "error": format!("llm: {e}"),
+                }),
+            );
+        }
+    };
+
+    let latency = start.elapsed().as_millis() as i32;
+    let precision = entity_match_fraction(&answer, &task.expected_entities);
+    let success = precision > 0.0;
 
     (
         precision,
         token_count,
-        token_count > 0,
+        success,
         latency,
         json!({
             "query": task.query,
             "condition_description": "Episode-only retrieval",
             "candidates_found": candidates_found,
             "candidates_selected": result.selected_items.len(),
+            "candidates_considered": retrieval.candidates_considered,
+            "answer": answer,
+            "answer_precision": precision,
+            "retrieval_precision": retrieval.combined,
+            "entity_recall": retrieval.entity_recall,
+            "predicate_recall": retrieval.predicate_recall,
         }),
     )
 }
 
-/// Condition C: full Loom pipeline. Embeds the query, runs all retrieval
-/// profiles for the inferred task class, weights, ranks, and compiles with
-/// hot-tier items. Classification is skipped — the task class is inferred
-/// from the task name prefix to keep benchmark latency deterministic.
+/// Condition C: full Loom pipeline + LLM. Embeds the query, runs all
+/// retrieval profiles for the inferred task class, weights, ranks, compiles
+/// with hot-tier items, then asks the LLM. Classification is skipped — the
+/// task class is inferred from the task name prefix to keep benchmark
+/// latency deterministic.
 async fn run_condition_c(
     task: &BenchmarkTask,
     pool: &PgPool,
@@ -405,7 +699,7 @@ async fn run_condition_c(
     let profiles = retrieve::merge_profiles(&task_class, None);
     let profile_names = retrieve::profile_names(&profiles);
 
-    let retrieval = match retrieve::execute_profiles(
+    let retrieval_result = match retrieve::execute_profiles(
         pool,
         &profiles,
         &query_embedding,
@@ -427,8 +721,8 @@ async fn run_condition_c(
         }
     };
 
-    let candidates_found = retrieval.candidates.len();
-    let weighted = weight::apply_weights(retrieval.candidates, &task_class);
+    let candidates_found = retrieval_result.candidates.len();
+    let weighted = weight::apply_weights(retrieval_result.candidates, &task_class);
     let ranked = rank::rank_candidates(weighted);
     let hot_tier_items = fetch_hot_tier(pool, &task.namespace).await;
 
@@ -438,19 +732,65 @@ async fn run_condition_c(
         target_model: "benchmark".to_string(),
         format: OutputFormat::Compact,
         warm_tier_budget: warm_budget(pool, &task.namespace).await,
-        hot_tier_items,
-        ranked_candidates: ranked,
+        hot_tier_items: hot_tier_items.clone(),
+        ranked_candidates: ranked.clone(),
     };
 
     let result = compile::compile_package(input);
-    let latency = start.elapsed().as_millis() as i32;
-    let precision = precision_from_context(&result.package.context_package, &task.expected_entities);
     let token_count = result.package.token_count as i32;
+
+    let selected_ids: Vec<Uuid> = result.selected_items.iter().map(|s| s.id).collect();
+    let retrieval = compute_retrieval_score(
+        pool,
+        &task.namespace,
+        &selected_ids,
+        &ranked,
+        &hot_tier_items,
+        &task.expected_entities,
+        &task.expected_facts,
+    )
+    .await;
+
+    let answer = match ask_llm(
+        llm_client,
+        config,
+        Some(&result.package.context_package),
+        &task.query,
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => {
+            let latency = start.elapsed().as_millis() as i32;
+            return (
+                0.0,
+                token_count,
+                false,
+                latency,
+                json!({
+                    "query": task.query,
+                    "condition_description": "Full Loom pipeline",
+                    "task_class": task_class.to_string(),
+                    "profiles": profile_names,
+                    "candidates_found": candidates_found,
+                    "candidates_selected": result.selected_items.len(),
+                    "retrieval_precision": retrieval.combined,
+                    "entity_recall": retrieval.entity_recall,
+                    "predicate_recall": retrieval.predicate_recall,
+                    "error": format!("llm: {e}"),
+                }),
+            );
+        }
+    };
+
+    let latency = start.elapsed().as_millis() as i32;
+    let precision = entity_match_fraction(&answer, &task.expected_entities);
+    let success = precision > 0.0;
 
     (
         precision,
         token_count,
-        token_count > 0,
+        success,
         latency,
         json!({
             "query": task.query,
@@ -459,6 +799,12 @@ async fn run_condition_c(
             "profiles": profile_names,
             "candidates_found": candidates_found,
             "candidates_selected": result.selected_items.len(),
+            "candidates_considered": retrieval.candidates_considered,
+            "answer": answer,
+            "answer_precision": precision,
+            "retrieval_precision": retrieval.combined,
+            "entity_recall": retrieval.entity_recall,
+            "predicate_recall": retrieval.predicate_recall,
         }),
     )
 }
@@ -469,9 +815,15 @@ async fn run_condition_c(
 
 /// Execute a full benchmark run across all tasks and all three conditions.
 ///
-/// Requires an active embedding model. If the `benchmark` namespace contains
-/// no episodes, conditions B and C will produce zero-token compilations — that
-/// is accurate, not a defect.
+/// Every condition calls the chat LLM (`classification_model`) so the
+/// `precision` column is comparable across A/B/C. The embedding model is also
+/// required for B and C. Expect ~3 LLM calls per task — on iGPU this can be
+/// several minutes for the full ten-task suite.
+///
+/// If the `benchmark` namespace contains no data, B and C will compile an
+/// empty wrapper and the LLM will see no useful context — they will likely
+/// score similarly to A. Seed the namespace from `seed/benchmark/` before
+/// running.
 pub async fn execute_benchmark(
     pools: &DbPools,
     llm_client: &LlmClient,
@@ -495,7 +847,10 @@ pub async fn execute_benchmark(
 
     for task in &tasks {
         let conditions: [(BenchmarkCondition, CondResult); 3] = [
-            (BenchmarkCondition::A, run_condition_a(task)),
+            (
+                BenchmarkCondition::A,
+                run_condition_a(task, llm_client, config).await,
+            ),
             (
                 BenchmarkCondition::B,
                 run_condition_b(task, pool, llm_client, config).await,
@@ -715,46 +1070,77 @@ mod tests {
     }
 
     #[test]
-    fn precision_zero_when_context_empty() {
+    fn entity_match_zero_when_text_empty() {
         let entities = vec!["Entity A".to_string(), "Entity B".to_string()];
-        assert_eq!(precision_from_context("", &entities), 0.0);
+        assert_eq!(entity_match_fraction("", &entities), 0.0);
     }
 
     #[test]
-    fn precision_full_when_all_entities_present() {
+    fn entity_match_full_when_all_present() {
         let entities = vec!["APIM".to_string(), "Auth Service".to_string()];
-        let ctx = "The APIM gateway routes requests through Auth Service for validation.";
-        assert_eq!(precision_from_context(ctx, &entities), 1.0);
+        let text = "The APIM gateway routes requests through Auth Service for validation.";
+        assert_eq!(entity_match_fraction(text, &entities), 1.0);
     }
 
     #[test]
-    fn precision_partial_match() {
+    fn entity_match_partial() {
         let entities = vec!["APIM".to_string(), "Auth Service".to_string(), "Redis".to_string()];
-        let ctx = "The APIM gateway delegates to Auth Service.";
-        let p = precision_from_context(ctx, &entities);
+        let text = "The APIM gateway delegates to Auth Service.";
+        let p = entity_match_fraction(text, &entities);
         assert!((p - 2.0 / 3.0).abs() < 1e-9);
     }
 
     #[test]
-    fn precision_case_insensitive() {
+    fn entity_match_case_insensitive() {
         let entities = vec!["apim".to_string()];
-        assert_eq!(precision_from_context("The APIM gateway", &entities), 1.0);
+        assert_eq!(entity_match_fraction("The APIM gateway", &entities), 1.0);
     }
 
     #[test]
-    fn condition_a_always_zero() {
-        let task = &benchmark_tasks()[0];
-        let (precision, tokens, success, latency, _) = run_condition_a(task);
-        assert_eq!(precision, 0.0);
-        assert_eq!(tokens, 0);
-        assert!(!success);
-        assert_eq!(latency, 0);
+    fn entity_match_empty_expected() {
+        // Defensive: if the operator forgot to set expected_entities, return
+        // zero rather than dividing by zero.
+        assert_eq!(entity_match_fraction("anything", &[]), 0.0);
+    }
+
+    #[test]
+    fn build_system_prompt_includes_context_when_present() {
+        let p = build_system_prompt(Some("{\"facts\":[]}"));
+        assert!(p.contains("Context:"));
+        assert!(p.contains("{\"facts\":[]}"));
+    }
+
+    #[test]
+    fn build_system_prompt_no_context_when_absent() {
+        let p_none = build_system_prompt(None);
+        let p_empty = build_system_prompt(Some(""));
+        assert!(!p_none.contains("Context:"));
+        assert!(!p_empty.contains("Context:"));
     }
 
     #[test]
     fn all_tasks_use_benchmark_namespace() {
         for task in benchmark_tasks() {
             assert_eq!(task.namespace, "benchmark", "task {} uses wrong namespace", task.name);
+        }
+    }
+
+    #[test]
+    fn all_tasks_have_expected_entities_and_facts() {
+        // A precision metric needs ground truth. Catch the "operator forgot
+        // to populate ground truth" mode at build time so a future task
+        // addition can't silently bake zero-precision into the suite.
+        for task in benchmark_tasks() {
+            assert!(
+                !task.expected_entities.is_empty(),
+                "task {} has empty expected_entities",
+                task.name
+            );
+            assert!(
+                !task.expected_facts.is_empty(),
+                "task {} has empty expected_facts",
+                task.name
+            );
         }
     }
 }
