@@ -472,15 +472,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `POST /dashboard/api/benchmarks/seed` endpoint at
   [loom-engine/src/api/dashboard.rs](loom-engine/src/api/dashboard.rs).
   Posts the engine's embedded seed corpus (10 documents from
-  `seed/benchmark/`) into the `benchmark` namespace as
+  `loom-engine/seed/benchmark/`) into the `benchmark` namespace as
   `user_authored_seed` episodes. Idempotent — repeat calls match on
   content hash or `(source, source_event_id)` and return
   `{inserted: 0, duplicates: <total>}`.
-- Seed corpus is now embedded into the engine binary via
-  `include_str!` ([loom-engine/src/pipeline/benchmark.rs](loom-engine/src/pipeline/benchmark.rs)),
-  so a fresh deploy ships with everything it needs to populate the
-  namespace from the dashboard. The on-disk `seed/benchmark/` files
-  remain authoritative for the CLI flow and as documentation.
+- Seed corpus lives at `loom-engine/seed/benchmark/` (moved from the
+  repo root so it sits inside the engine's Docker build context — the
+  initial location used `include_str!` paths that walked outside the
+  context and broke the GHCR build) and is embedded into the engine
+  binary via `include_str!`
+  ([loom-engine/src/pipeline/benchmark.rs](loom-engine/src/pipeline/benchmark.rs)).
+  A fresh deploy ships with everything it needs to populate the
+  namespace from the dashboard. The on-disk files remain authoritative
+  for the CLI flow and as documentation.
 - New "Seed benchmark data" button on the Benchmark page
   ([loom-dashboard/src/pages/BenchmarkPage.tsx](loom-dashboard/src/pages/BenchmarkPage.tsx))
   surfaces in the page header next to "Run new benchmark." A status
@@ -519,11 +523,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and C, and click-to-expand per-task rows that show the LLM answer and
   the retrieval-side metrics for every condition. `BenchmarkTaskResult`
   gained an optional `details: BenchmarkTaskDetails` field.
-- New seed corpus at [seed/benchmark/](seed/benchmark/) — 10 markdown
-  documents, one per benchmark task, that mention each task's expected
-  entities and use natural-language relations the extraction LLM should
-  normalise to the expected predicates. Drive with
-  `cli/loom-seed.py --namespace benchmark seed/benchmark/`.
+- New seed corpus at [loom-engine/seed/benchmark/](loom-engine/seed/benchmark/)
+  — 10 markdown documents, one per benchmark task, that mention each
+  task's expected entities and use natural-language relations the
+  extraction LLM should normalise to the expected predicates. Drive
+  with `cli/loom-seed.py --namespace benchmark loom-engine/seed/benchmark/`
+  or click "Seed benchmark data" on the dashboard.
 - `precision_from_context` removed; replaced with `entity_match_fraction`
   (text-side) and `compute_retrieval_score` (structured, predicate-aware,
   hydrates names). The four old precision unit tests were updated to the

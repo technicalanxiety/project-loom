@@ -13,15 +13,19 @@ benchmark numbers.**
 
 ## Seeding
 
-Each `*.md` file in this directory is a verbatim episode. Post them
-through `loom-seed.py`, which uses the `user_authored_seed` ingestion
-mode (provenance coefficient 0.8):
+Easiest path is the dashboard: open the Benchmark page and click
+**Seed benchmark data**. The engine ships with this corpus embedded
+via `include_str!` and posts it through `/dashboard/api/benchmarks/seed`.
+
+If you prefer the CLI, each `*.md` file is a verbatim episode. Post
+them through `loom-seed.py`, which uses the `user_authored_seed`
+ingestion mode (provenance coefficient 0.8):
 
 ```bash
 export LOOM_URL="https://loom.yourdomain.com"
 export LOOM_TOKEN="your-bearer-token"
 
-cli/loom-seed.py --namespace benchmark seed/benchmark/
+cli/loom-seed.py --namespace benchmark loom-engine/seed/benchmark/
 ```
 
 The worker will extract entities and facts in the background. Check

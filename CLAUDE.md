@@ -136,7 +136,7 @@ burned once by mocked tests passing while a prod migration was broken.
 | Bootstrap parsers (vendor imports) | `bootstrap/` |
 | Client templates (configs, hooks, instructions) | `templates/` |
 | Seed CLI | `cli/loom-seed.py` |
-| Benchmark seed corpus | `seed/benchmark/` |
+| Benchmark seed corpus | `loom-engine/seed/benchmark/` |
 | Specs | `.kiro/specs/loom-memory-compiler/` |
 
 ## When in doubt
@@ -171,6 +171,7 @@ burned once by mocked tests passing while a prod migration was broken.
   it measures fraction of expected entities mentioned in the answer.
   B and C also record `details.retrieval_precision` (predicate-aware,
   with hydrated entity names so warm-tier facts contribute). Run
-  `cli/loom-seed.py --namespace benchmark seed/benchmark/` and let
-  extraction settle before reading the cards; an empty `benchmark`
-  namespace makes B/C indistinguishable from A.
+  `cli/loom-seed.py --namespace benchmark loom-engine/seed/benchmark/`
+  (or click "Seed benchmark data" on the dashboard) and let extraction
+  settle before reading the cards; an empty `benchmark` namespace
+  makes B/C indistinguishable from A.

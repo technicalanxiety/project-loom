@@ -87,7 +87,7 @@ const HowToRead: React.FC = () => {
             Click a row in the per-task table to see the LLM's answer and B/C's retrieval-side
             metrics (entity recall, predicate recall, candidates considered). If every row shows 0%
             across all three conditions, the <code>benchmark</code> namespace is probably empty —
-            see <code>seed/benchmark/</code>.
+            click <strong>Seed benchmark data</strong> at the top of the page.
           </p>
         </div>
       )}
@@ -118,7 +118,7 @@ const EmptyNamespaceHint: React.FC<EmptyHintProps> = ({ comparison }) => {
       have nothing extra to feed the LLM and should be expected to score similarly to A. Click{' '}
       <strong>Seed benchmark data</strong> at the top of the page, wait for extraction to finish on
       the Compilations page, then re-run. (Or post the corpus from the CLI:{' '}
-      <code>cli/loom-seed.py --namespace benchmark seed/benchmark/</code>.)
+      <code>cli/loom-seed.py --namespace benchmark loom-engine/seed/benchmark/</code>.)
     </div>
   );
 };

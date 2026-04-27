@@ -35,7 +35,8 @@
 //! Empty `benchmark` namespace? B and C will compile the empty wrapper and
 //! the LLM will be asked to answer with no context — the answer will likely
 //! score similarly to A. The fix is to seed the namespace; see
-//! `seed/benchmark/`.
+//! `loom-engine/seed/benchmark/` (the dashboard "Seed benchmark data"
+//! button calls into [`seed_benchmark_namespace`]).
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -813,7 +814,7 @@ async fn run_condition_c(
 // Seed corpus (embedded at compile time)
 // ---------------------------------------------------------------------------
 
-/// One markdown document from `seed/benchmark/` — content embedded at compile
+/// One markdown document from `loom-engine/seed/benchmark/` — content embedded at compile
 /// time via `include_str!` so the engine ships with the corpus and doesn't
 /// need a runtime filesystem path. The `event_id` is stable across calls so
 /// the (`source`, `source_event_id`) unique constraint makes seeding
@@ -829,43 +830,43 @@ struct SeedDoc {
 const SEED_DOCS: &[SeedDoc] = &[
     SeedDoc {
         event_id: "seed:benchmark/01-debug-auth-failure.md",
-        content: include_str!("../../../seed/benchmark/01-debug-auth-failure.md"),
+        content: include_str!("../../seed/benchmark/01-debug-auth-failure.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/02-debug-memory-leak.md",
-        content: include_str!("../../../seed/benchmark/02-debug-memory-leak.md"),
+        content: include_str!("../../seed/benchmark/02-debug-memory-leak.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/03-arch-service-topology.md",
-        content: include_str!("../../../seed/benchmark/03-arch-service-topology.md"),
+        content: include_str!("../../seed/benchmark/03-arch-service-topology.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/04-arch-data-flow.md",
-        content: include_str!("../../../seed/benchmark/04-arch-data-flow.md"),
+        content: include_str!("../../seed/benchmark/04-arch-data-flow.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/05-compliance-gdpr.md",
-        content: include_str!("../../../seed/benchmark/05-compliance-gdpr.md"),
+        content: include_str!("../../seed/benchmark/05-compliance-gdpr.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/06-compliance-access-review.md",
-        content: include_str!("../../../seed/benchmark/06-compliance-access-review.md"),
+        content: include_str!("../../seed/benchmark/06-compliance-access-review.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/07-writing-api-docs.md",
-        content: include_str!("../../../seed/benchmark/07-writing-api-docs.md"),
+        content: include_str!("../../seed/benchmark/07-writing-api-docs.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/08-writing-runbook.md",
-        content: include_str!("../../../seed/benchmark/08-writing-runbook.md"),
+        content: include_str!("../../seed/benchmark/08-writing-runbook.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/09-chat-project-status.md",
-        content: include_str!("../../../seed/benchmark/09-chat-project-status.md"),
+        content: include_str!("../../seed/benchmark/09-chat-project-status.md"),
     },
     SeedDoc {
         event_id: "seed:benchmark/10-chat-team-ownership.md",
-        content: include_str!("../../../seed/benchmark/10-chat-team-ownership.md"),
+        content: include_str!("../../seed/benchmark/10-chat-team-ownership.md"),
     },
 ];
 
@@ -974,8 +975,9 @@ pub async fn seed_benchmark_namespace(
 ///
 /// If the `benchmark` namespace contains no data, B and C will compile an
 /// empty wrapper and the LLM will see no useful context — they will likely
-/// score similarly to A. Seed the namespace from `seed/benchmark/` before
-/// running.
+/// score similarly to A. Seed the namespace via the dashboard's "Seed
+/// benchmark data" button (or `loom-engine/seed/benchmark/` over the CLI)
+/// before running.
 pub async fn execute_benchmark(
     pools: &DbPools,
     llm_client: &LlmClient,

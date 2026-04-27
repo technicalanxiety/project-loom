@@ -18,10 +18,14 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs
 RUN cargo build --release || true
 RUN rm -rf src
 
-# Copy real source, migrations, and prompts
+# Copy real source, migrations, prompts, and embedded seed corpus.
+# `seed/` is read by `include_str!` in pipeline/benchmark.rs at compile time so
+# the benchmark namespace can be populated without a runtime FS dependency.
+# Missing this COPY would fail compilation, not runtime.
 COPY src/ src/
 COPY migrations/ migrations/
 COPY prompts/ prompts/
+COPY seed/ seed/
 
 # Build the release binary
 RUN cargo build --release && \
