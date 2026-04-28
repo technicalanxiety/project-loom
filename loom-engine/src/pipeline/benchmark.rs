@@ -1039,17 +1039,92 @@ pub async fn execute_benchmark(
         }
     }
 
-    sqlx::query("UPDATE loom_benchmark_runs SET status = 'completed' WHERE id = $1")
-        .bind(run_id)
-        .execute(pool)
-        .await?;
+    // Only flip to `completed` if the row is still `running`. A separate
+    // cancel call (or the startup reaper) may have already moved it to
+    // `failed`; respect that — the operator decided this run wasn't worth
+    // finishing, and the partial per-task results that did land remain
+    // queryable. The returned status reflects the post-update state so the
+    // HTTP caller sees the truth.
+    let final_status: Option<String> = sqlx::query_scalar(
+        "UPDATE loom_benchmark_runs \
+         SET status = 'completed' \
+         WHERE id = $1 AND status = 'running' \
+         RETURNING status",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?;
 
+    let status = final_status.unwrap_or_else(|| "failed".to_string());
     Ok(BenchmarkRunSummary {
         id: run_id,
         name: run_name,
         created_at: now,
-        status: "completed".to_string(),
+        status,
     })
+}
+
+/// Mark all `running` benchmark rows older than `threshold_hours` as
+/// `failed`. Call once at engine startup to clean up runs orphaned by a
+/// previous container restart, browser disconnect, or panic — `running` is
+/// a permanent state otherwise because nothing else moves the row out of
+/// it.
+///
+/// Threshold is 2 hours by default in `main.rs`. With 30 LLM calls per
+/// benchmark and a 300 s per-call timeout, the worst-case legitimate
+/// runtime is well under that even on iGPU; anything older is
+/// pathologically stuck.
+pub async fn reap_stale_benchmark_runs(
+    pool: &PgPool,
+    threshold_hours: i64,
+) -> Result<i64, BenchmarkError> {
+    // Format the interval inline rather than binding it — Postgres
+    // doesn't accept a parameter on the right side of an INTERVAL cast.
+    let sql = format!(
+        "WITH reaped AS (\
+           UPDATE loom_benchmark_runs \
+           SET status = 'failed' \
+           WHERE status = 'running' \
+             AND created_at < NOW() - INTERVAL '{threshold_hours} hours' \
+           RETURNING id\
+         ) \
+         SELECT COUNT(*) FROM reaped"
+    );
+    let count: i64 = sqlx::query_scalar(&sql).fetch_one(pool).await?;
+    if count > 0 {
+        tracing::warn!(
+            count, threshold_hours,
+            "marked stale benchmark runs as failed"
+        );
+    }
+    Ok(count)
+}
+
+/// Cancel a `running` benchmark by flipping its row to `failed`. The
+/// running pipeline is *not* aborted — that would require plumbing a
+/// cancellation token through every retrieval and LLM call — so the
+/// engine keeps doing the work it's already started, but the dashboard
+/// stops showing the spinner and the conditional UPDATE in
+/// `execute_benchmark` won't override the cancelled state when the loop
+/// finishes. For single-operator infra, "I clicked cancel, the visible
+/// state changes immediately" is good enough.
+///
+/// Returns `true` if the row was running and is now failed, `false` if
+/// the row was already in a terminal state (no-op).
+pub async fn cancel_benchmark_run(
+    pool: &PgPool,
+    run_id: Uuid,
+) -> Result<bool, BenchmarkError> {
+    let updated: Option<(Uuid,)> = sqlx::query_as(
+        "UPDATE loom_benchmark_runs \
+         SET status = 'failed' \
+         WHERE id = $1 AND status = 'running' \
+         RETURNING id",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(updated.is_some())
 }
 
 /// List all benchmark runs ordered by most recent first.

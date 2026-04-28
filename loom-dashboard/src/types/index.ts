@@ -479,6 +479,15 @@ export interface SeedSummary {
   duplicates: number;
 }
 
+/** Result of `POST /dashboard/api/benchmarks/{id}/cancel`. */
+export interface CancelBenchmarkResponse {
+  /** The run id that was targeted. */
+  id: string;
+  /** True when the row was `running` and got flipped to `failed`. False
+   * when the run was already in a terminal state — the call was a no-op. */
+  cancelled: boolean;
+}
+
 /** Full benchmark comparison for the dashboard view. */
 export interface BenchmarkComparison {
   /** The benchmark run metadata. */

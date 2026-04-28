@@ -2166,6 +2166,36 @@ pub async fn handle_seed_benchmark(
     Ok(Json(summary))
 }
 
+/// Response payload for `POST /dashboard/api/benchmarks/{id}/cancel`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelBenchmarkResponse {
+    /// The run id passed in the URL.
+    pub id: Uuid,
+    /// True when the row was `running` and got flipped to `failed`. False
+    /// when the run was already completed/failed (the call is a no-op).
+    pub cancelled: bool,
+}
+
+/// Cancel a running benchmark by marking the row as `failed`. The pipeline
+/// continues executing in the background — partial per-task results that
+/// already landed are preserved. The dashboard's running spinner stops
+/// immediately on success.
+pub async fn handle_cancel_benchmark(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<CancelBenchmarkResponse>, DashboardError> {
+    let cancelled =
+        crate::pipeline::benchmark::cancel_benchmark_run(&state.pools.online, id)
+            .await
+            .map_err(|e| DashboardError::Database(e.to_string()))?;
+    if cancelled {
+        tracing::info!(run_id = %id, "benchmark run cancelled");
+    } else {
+        tracing::info!(run_id = %id, "benchmark cancel no-op (run not in running state)");
+    }
+    Ok(Json(CancelBenchmarkResponse { id, cancelled }))
+}
+
 // ---------------------------------------------------------------------------
 // GET /dashboard/api/metrics/parser-health
 // ---------------------------------------------------------------------------

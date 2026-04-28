@@ -467,6 +467,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+#### Stale benchmark runs no longer hang in `running` forever
+
+- Closed a long-standing bug where `execute_benchmark` only updated the
+  row to `completed` at the very end of the loop. Any of: a browser
+  refresh during a run (axum cancels the handler when the client
+  disconnects, dropping the future), a container restart, or a panic
+  inside one of the runners — would orphan the row in `running` and
+  the dashboard would show a permanent spinner. Two fixes that work
+  together:
+- **Startup reaper** — `reap_stale_benchmark_runs(pool, 2)` runs once
+  in [loom-engine/src/main.rs](loom-engine/src/main.rs) right after
+  migrations and marks any `running` row older than 2 hours as
+  `failed`. Threshold is well past the worst-case legitimate runtime
+  (30 LLM calls × 300 s timeout × 3 retries) on iGPU.
+- **Manual cancel** — new `POST /dashboard/api/benchmarks/{id}/cancel`
+  endpoint at [loom-engine/src/api/dashboard.rs](loom-engine/src/api/dashboard.rs)
+  flips a `running` row to `failed` immediately. The pipeline keeps
+  executing in the background — partial per-task results that already
+  landed are preserved — but the spinner stops. The completion UPDATE
+  in `execute_benchmark` is now conditional (`WHERE status = 'running'`)
+  so a cancelled run doesn't get re-flipped to `completed` when the
+  loop eventually finishes.
+- **Dashboard surface** — Cancel button on each `running` row in the
+  Benchmark page runs table
+  ([loom-dashboard/src/pages/BenchmarkPage.tsx](loom-dashboard/src/pages/BenchmarkPage.tsx)).
+  Madder-tinted ghost button so it reads as the destructive option
+  without screaming. Errors from the cancel call surface as a standard
+  `.error` div above the runs list.
+
 #### One-click "Seed benchmark data" button on the Benchmark page
 
 - New `POST /dashboard/api/benchmarks/seed` endpoint at

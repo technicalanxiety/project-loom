@@ -18,7 +18,13 @@
  */
 import type React from 'react';
 import { Fragment, useCallback, useState } from 'react';
-import { getBenchmarkDetail, getBenchmarkRuns, runBenchmark, seedBenchmark } from '../api/client';
+import {
+  cancelBenchmark,
+  getBenchmarkDetail,
+  getBenchmarkRuns,
+  runBenchmark,
+  seedBenchmark,
+} from '../api/client';
 import { useApi } from '../hooks/useApi';
 import { relativeTime } from '../lib/thresholds';
 import type {
@@ -430,6 +436,8 @@ export const BenchmarkPage: React.FC = () => {
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState<SeedSummary | null>(null);
   const [seedError, setSeedError] = useState<string | null>(null);
+  const [cancellingRun, setCancellingRun] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const handleSelectRun = useCallback(async (run: BenchmarkRun) => {
     setDetailLoading(true);
@@ -473,6 +481,23 @@ export const BenchmarkPage: React.FC = () => {
       setSeeding(false);
     }
   }, []);
+
+  const handleCancel = useCallback(
+    async (id: string) => {
+      setCancellingRun(id);
+      setCancelError(null);
+      try {
+        await cancelBenchmark(id);
+        refetch();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to cancel benchmark run';
+        setCancelError(message);
+      } finally {
+        setCancellingRun(null);
+      }
+    },
+    [refetch],
+  );
 
   return (
     <>
@@ -526,6 +551,7 @@ export const BenchmarkPage: React.FC = () => {
         </div>
       )}
       {seedError && <div className="error">{seedError}</div>}
+      {cancelError && <div className="error">{cancelError}</div>}
 
       {loading && <div className="loading">Loading runs…</div>}
       {error && <div className="error">{error}</div>}
@@ -578,7 +604,21 @@ export const BenchmarkPage: React.FC = () => {
                         {run.status}
                       </span>
                     </td>
-                    <td>
+                    <td className="bench-run-actions">
+                      {run.status === 'running' && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-cancel"
+                          disabled={cancellingRun === run.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCancel(run.id);
+                          }}
+                          title="Mark this stuck run as failed. The pipeline keeps running in the background but the spinner stops."
+                        >
+                          {cancellingRun === run.id ? 'Cancelling…' : 'Cancel'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-ghost"

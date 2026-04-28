@@ -1373,6 +1373,26 @@ select.form-control {
   border-radius: 3px;
 }
 
+/* ---- Benchmarks: run-row actions --------------------------- */
+
+.bench-run-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  align-items: center;
+}
+.bench-run-actions .btn-cancel {
+  color: var(--madder-700);
+}
+.bench-run-actions .btn-cancel:hover:not(:disabled) {
+  color: var(--madder-800);
+  background: var(--madder-100);
+}
+.bench-run-actions .btn-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ---- Benchmarks: seed-result toast ------------------------ */
 
 .bench-seed-result {

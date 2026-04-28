@@ -9,6 +9,7 @@ import type {
   ActivePredicatesResponse,
   BenchmarkComparison,
   BenchmarkRun,
+  CancelBenchmarkResponse,
   ClassificationMetrics,
   CompilationDetail,
   CompilationSummary,
@@ -273,4 +274,12 @@ export async function runBenchmark(): Promise<BenchmarkRun> {
  * seeding, so the operator must wait before running a benchmark. */
 export async function seedBenchmark(): Promise<SeedSummary> {
   return postJson<SeedSummary>('/benchmarks/seed', {});
+}
+
+/** Cancel a running benchmark by flipping the row to `failed`. The pipeline
+ * keeps executing in the background — partial results that already landed
+ * are preserved — but the dashboard's spinner stops. Returns
+ * `{cancelled: false}` if the run was already in a terminal state. */
+export async function cancelBenchmark(id: string): Promise<CancelBenchmarkResponse> {
+  return postJson<CancelBenchmarkResponse>(`/benchmarks/${encodeURIComponent(id)}/cancel`, {});
 }
