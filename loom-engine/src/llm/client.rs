@@ -199,13 +199,40 @@ impl LlmClient {
     /// Tries Ollama first with retries. Falls back to Azure OpenAI on
     /// connection errors.
     ///
-    /// `truncate: true` asks Ollama's OpenAI-compat layer to drop tokens
-    /// past the embedding model's context window (8192 for
-    /// nomic-embed-text) instead of rejecting the request with HTTP 400
-    /// "the input length exceeds the context length". The field is
-    /// non-standard OpenAI but Ollama's `openai/openai.go` translator
-    /// reads it. See ADR-011 for the bounded-input rationale.
+    /// If Ollama returns HTTP 400 "the input length exceeds the context
+    /// length" (which happens when `truncate: true` is silently ignored by
+    /// the running Ollama version), this method retries once with the input
+    /// halved by character count. Callers are expected to pre-truncate to
+    /// [`crate::llm::embeddings::EMBED_CHAR_LIMIT`]; the halved-retry is a
+    /// last-resort defence for content whose token density exceeds the
+    /// 1 char/token worst-case estimate (e.g. 4-byte Unicode that the
+    /// tokenizer decomposes into individual bytes). See ADR-011.
     pub async fn call_embeddings(
+        &self,
+        model: &str,
+        input: &str,
+    ) -> Result<Vec<f32>, LlmError> {
+        match self.call_embeddings_inner(model, input).await {
+            Err(ref e) if is_context_length_error(e) => {
+                let half_chars = input.chars().count() / 2;
+                let truncated = match input.char_indices().nth(half_chars) {
+                    Some((byte_idx, _)) => &input[..byte_idx],
+                    None => input,
+                };
+                tracing::warn!(
+                    original_chars = input.chars().count(),
+                    retry_chars = truncated.chars().count(),
+                    "embedding input exceeded model context window — retrying with halved input"
+                );
+                self.call_embeddings_inner(model, truncated).await
+            }
+            other => other,
+        }
+    }
+
+    /// Inner implementation for [`call_embeddings`] — a single attempt
+    /// without the context-length retry wrapper.
+    async fn call_embeddings_inner(
         &self,
         model: &str,
         input: &str,
@@ -586,6 +613,13 @@ fn is_reqwest_connection_error(e: &reqwest::Error) -> bool {
         || msg.contains("connection refused")
         || msg.contains("dns")
         || msg.contains("error sending request")
+}
+
+/// Return `true` if `err` is a 400 indicating the input exceeded the model's
+/// context window. Used by [`LlmClient::call_embeddings`] to decide whether
+/// to retry with a shorter input.
+fn is_context_length_error(err: &LlmError) -> bool {
+    matches!(err, LlmError::ApiError { status: 400, body } if body.contains("context length"))
 }
 
 /// Truncate a string to at most `max` characters.
@@ -1084,5 +1118,119 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, LlmError::RetriesExhausted(_)));
+    }
+
+    // -- context-length retry for embeddings --------------------------------
+
+    #[tokio::test]
+    async fn embedding_retries_with_halved_input_on_context_length_400() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // First call returns 400 "context length exceeded".
+        Mock::given(method("POST"))
+            .and(path("/v1/embeddings"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": {
+                    "message": "the input length exceeds the context length",
+                    "type": "invalid_request_error"
+                }
+            })))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        // Second call (with halved input) succeeds.
+        Mock::given(method("POST"))
+            .and(path("/v1/embeddings"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [{ "embedding": [0.1_f32, 0.2, 0.3] }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = LlmConfig {
+            ollama_url: server.uri(),
+            extraction_model: "test".to_string(),
+            classification_model: "test".to_string(),
+            embedding_model: "nomic-embed-text".to_string(),
+            azure_openai_url: None,
+            azure_openai_key: None,
+        };
+
+        let client = LlmClient::new(&config).expect("should build");
+        let long_input = "a".repeat(10_000);
+        let result = client
+            .call_embeddings("nomic-embed-text", &long_input)
+            .await
+            .expect("should succeed after halved retry");
+
+        assert_eq!(result.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn embedding_does_not_retry_on_other_400() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // 400 with a different error body — should NOT retry.
+        Mock::given(method("POST"))
+            .and(path("/v1/embeddings"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": { "message": "model not found", "type": "invalid_request_error" }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let config = LlmConfig {
+            ollama_url: server.uri(),
+            extraction_model: "test".to_string(),
+            classification_model: "test".to_string(),
+            embedding_model: "nomic-embed-text".to_string(),
+            azure_openai_url: None,
+            azure_openai_key: None,
+        };
+
+        let client = LlmClient::new(&config).expect("should build");
+        let err = client
+            .call_embeddings("nomic-embed-text", "hello")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, LlmError::ApiError { status: 400, .. }));
+    }
+
+    #[test]
+    fn is_context_length_error_matches_ollama_message() {
+        let err = LlmError::ApiError {
+            status: 400,
+            body: r#"{"error":{"message":"the input length exceeds the context length","type":"invalid_request_error"}}"#.into(),
+        };
+        assert!(is_context_length_error(&err));
+    }
+
+    #[test]
+    fn is_context_length_error_does_not_match_other_400() {
+        let err = LlmError::ApiError {
+            status: 400,
+            body: r#"{"error":{"message":"model not found"}}"#.into(),
+        };
+        assert!(!is_context_length_error(&err));
+    }
+
+    #[test]
+    fn is_context_length_error_does_not_match_non_400() {
+        let err = LlmError::ApiError {
+            status: 500,
+            body: "context length exceeded".into(),
+        };
+        assert!(!is_context_length_error(&err));
     }
 }

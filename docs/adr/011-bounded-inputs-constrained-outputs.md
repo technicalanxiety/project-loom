@@ -99,14 +99,33 @@ splitting mid-record (see the `MAX_CHUNK_BYTES` comment) — those
 chunks slipped through the 16K cap. 8,000 chars matches 8192 tokens at
 the worst-case 1:1 ratio.
 
-**Layer B — server-side truncation.** Pass `truncate: true` on the
-Ollama embeddings request body. Ollama's `openai/openai.go`
+**Layer B — server-side truncation hint.** Pass `truncate: true` on
+the Ollama embeddings request body. Ollama's `openai/openai.go`
 translator reads this field on the OpenAI-compat `/v1/embeddings`
 endpoint and forwards it to the native `/api/embed` handler, which
-drops overflowing tokens instead of returning HTTP 400. This is
-belt-and-suspenders against any oversized chunk that slips through
-Layer A (e.g., highly multi-byte content where char count
-underestimates byte/token count).
+drops overflowing tokens instead of returning HTTP 400. In practice
+this field is silently ignored by some Ollama versions, which return
+HTTP 400 instead. Treat Layer B as best-effort; Layer C is the actual
+backstop.
+
+**Layer C — adaptive context-length retry in `call_embeddings`.**
+When the Ollama embeddings endpoint returns HTTP 400 with a body
+containing `"context length"`, `LlmClient::call_embeddings` retries
+once with the input halved by character count (~4,000 chars from
+8,000). This handles any content whose token density exceeds the
+1 char/token worst-case estimate — most commonly 4-byte Unicode
+codepoints that the nomic-embed-text WordPiece tokenizer decomposes
+into individual byte tokens (4 tokens per char). A single halving
+brings any 8 K-char input to ≤ 4,096 tokens, safely under the 8,192
+token window regardless of encoding.
+
+**Entity embedding truncation.** `generate_entity_embedding` assembles
+`"{name}: {context}"` where `context` is the source episode content.
+Episode content is unbounded; the composed string is now truncated to
+`EMBED_CHAR_LIMIT` before the call, applying the same Layer A cap as
+episode embeddings. Without this, Pass 3 semantic matching and the
+serving-state update in `update_serving_state_and_link` could pass an
+arbitrarily long episode as the entity's embedding context.
 
 The truncation is a *representational* decision — what the embedding
 model sees as input. The episode's `content` column remains verbatim,
@@ -173,7 +192,7 @@ schema enforcement is incomplete.
 ### Negative
 
 - Embedding semantic fidelity is reduced for episodes longer than
-  16,000 chars. The vector represents only the leading content. For
+  8,000 chars. The vector represents only the leading content. For
   most Claude Code transcripts (intent-up-front structure) this is
   fine; for an episode that pivots topic past the truncation point,
   the embedding will be biased toward the early content.

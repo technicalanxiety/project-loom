@@ -85,7 +85,10 @@ pub async fn generate_embedding(
 ///
 /// The name and context are joined as `"{name}: {context}"` to produce a
 /// single input string that captures both the entity identity and its
-/// surrounding context from the source episode.
+/// surrounding context from the source episode. The composed string is
+/// truncated to [`EMBED_CHAR_LIMIT`] before sending — episode content passed
+/// as context can be arbitrarily large and the Ollama `truncate: true` hint
+/// is not reliably honored across all server versions.
 ///
 /// # Errors
 ///
@@ -98,12 +101,21 @@ pub async fn generate_entity_embedding(
     context: &str,
 ) -> Result<Vec<f32>, EmbeddingError> {
     let input = format!("{name}: {context}");
+    let truncated = truncate_for_embedding(&input);
+    if truncated.len() < input.len() {
+        tracing::warn!(
+            entity_name = %name,
+            original_chars = input.chars().count(),
+            truncated_chars = EMBED_CHAR_LIMIT,
+            "entity embedding input exceeds context window — truncating"
+        );
+    }
     tracing::debug!(
         entity_name = %name,
-        context_len = context.len(),
+        context_len = truncated.len(),
         "generating entity embedding"
     );
-    generate_embedding(client, config, &input).await
+    generate_embedding(client, config, truncated).await
 }
 
 /// Generate a 768-dimension embedding for episode content.

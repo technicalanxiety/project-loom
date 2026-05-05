@@ -155,7 +155,7 @@ burned once by mocked tests passing while a prod migration was broken.
   [ADR-009](docs/adr/009-extraction-model-for-igpu.md) (extraction
   model tiers — `qwen2.5:14b` on iGPU/APU, `gemma4:26b` on discrete,
   `gemma4:e4b` last resort) and [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)
-  (16K embedding char cap, schema-constrained extraction via
+  (8K embedding char cap + adaptive context-length retry, schema-constrained extraction via
   `response_format: json_schema`). The 300 s `REQUEST_TIMEOUT` is not
   configurable — keeps the operating envelope honest.
 - **Touching the MCP wire protocol?** Re-read [ADR-008](docs/adr/008-mcp-wire-protocol.md).
