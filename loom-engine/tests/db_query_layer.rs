@@ -52,7 +52,6 @@ mod episode_idempotency {
     #[tokio::test]
     async fn duplicate_source_event_id_returns_existing_row() {
         let pool = setup_test_pool().await;
-        let mut tx = pool.begin().await.expect("begin tx");
 
         let source = format!("test-source-{}", Uuid::new_v4());
         let event_id = format!("evt-{}", Uuid::new_v4());
@@ -98,8 +97,6 @@ mod episode_idempotency {
             first.id, second.id,
             "Duplicate source_event_id should return the same episode ID"
         );
-
-        tx.rollback().await.expect("rollback");
     }
 
     #[tokio::test]

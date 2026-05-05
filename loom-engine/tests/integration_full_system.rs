@@ -279,8 +279,10 @@ fn build_fact_candidate(score: f64, namespace: &str) -> RetrievalCandidate {
         memory_type: MemoryType::Semantic,
         payload: CandidatePayload::Fact(FactCandidate {
             subject_id: Uuid::new_v4(),
+            subject_name: "subject".to_string(),
             predicate: "uses".to_string(),
             object_id: Uuid::new_v4(),
+            object_name: "object".to_string(),
             evidence_status: "extracted".to_string(),
             source_episodes: vec![Uuid::new_v4()],
             namespace: namespace.to_string(),
@@ -442,14 +444,9 @@ mod offline_pipeline {
         let new_valid_from = chrono::Utc::now();
 
         // Simulate supersession: old fact gets valid_until = new_valid_from.
-        let old_valid_until = Some(new_valid_from);
-
+        let old_valid_until = new_valid_from;
         assert!(
-            old_valid_until.is_some(),
-            "superseded fact must have valid_until set"
-        );
-        assert!(
-            old_valid_until.unwrap() > old_valid_from,
+            old_valid_until > old_valid_from,
             "valid_until must be after valid_from"
         );
     }
@@ -714,27 +711,30 @@ mod online_pipeline {
 
         // Audit entry should capture all fields.
         let profile_names = retrieve::profile_names(&profiles);
-        let audit = compile::build_audit_entry(
-            &result,
-            "project-sentinel",
-            &classification.primary_class,
-            Some("debug auth issue"),
-            Some("claude-3.5-sonnet"),
-            &classification.primary_class.to_string(),
-            classification
-                .secondary_class
-                .as_ref()
-                .map(|c| c.to_string())
-                .as_deref(),
-            Some(classification.primary_confidence),
-            classification.secondary_confidence,
-            &profile_names,
-            Some(150),
-            Some(20),
-            Some(80),
-            Some(10),
-            Some(40),
-        );
+        let primary_class = classification.primary_class.to_string();
+        let secondary_class = classification
+            .secondary_class
+            .as_ref()
+            .map(|c| c.to_string());
+        let audit = compile::build_audit_entry(compile::AuditEntryInput {
+            result: &result,
+            namespace: "project-sentinel",
+            task_class: &classification.primary_class,
+            query_text: Some("debug auth issue"),
+            target_model: Some("claude-3.5-sonnet"),
+            primary_class: &primary_class,
+            secondary_class: secondary_class.as_deref(),
+            primary_confidence: Some(classification.primary_confidence),
+            secondary_confidence: classification.secondary_confidence,
+            profiles_executed: &profile_names,
+            latencies: compile::AuditLatencies {
+                total_ms: Some(150),
+                classify_ms: Some(20),
+                retrieve_ms: Some(80),
+                rank_ms: Some(10),
+                compile_ms: Some(40),
+            },
+        });
 
         assert_eq!(audit.namespace, "project-sentinel");
         assert_eq!(audit.task_class, "debug");
@@ -779,11 +779,11 @@ mod loom_recall {
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["entity_names"].as_array().unwrap().len(), 2);
         assert_eq!(json["namespace"], "project-sentinel");
-        assert_eq!(json["include_historical"], true);
+        assert!(json["include_historical"].as_bool().unwrap());
 
         let deserialized: RecallRequest = serde_json::from_value(json).unwrap();
         assert_eq!(deserialized.entity_names, req.entity_names);
-        assert_eq!(deserialized.include_historical, true);
+        assert!(deserialized.include_historical);
     }
 
     /// RecallResponse with empty facts is valid.
@@ -1275,10 +1275,9 @@ mod tier_management {
     /// Default warm tier budget constant is defined.
     #[test]
     fn default_warm_tier_budget_is_defined() {
-        assert!(
-            compile::DEFAULT_WARM_TIER_BUDGET > 0,
-            "default warm tier budget must be positive"
-        );
+        const {
+            assert!(compile::DEFAULT_WARM_TIER_BUDGET > 0);
+        }
     }
 }
 

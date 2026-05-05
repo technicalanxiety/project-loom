@@ -810,6 +810,7 @@ struct ProcedureRow {
 /// * `namespace` — Namespace isolation boundary.
 /// * `query_terms` — Tokenized query terms for entity matching and boosting.
 /// * `task_class` — Active task class (used by procedure_assist exclusion).
+///
 /// Default timeout for individual profile execution (5 seconds).
 const PROFILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 

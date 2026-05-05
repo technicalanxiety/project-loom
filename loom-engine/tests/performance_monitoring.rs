@@ -9,18 +9,16 @@ use std::time::{Duration, Instant};
 
 use loom_engine::pipeline::online::classify;
 use loom_engine::pipeline::online::compile::{
-    self, CompilationInput, CompilationResult, HotFact, HotTierItem, HotTierPayload, SelectedItem,
+    self, CompilationInput, HotFact, HotTierItem, HotTierPayload,
 };
-use loom_engine::pipeline::online::rank::{self, RankedCandidate};
+use loom_engine::pipeline::online::rank;
 use loom_engine::pipeline::online::retrieve::{
-    CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType, RetrievalCandidate,
-    RetrievalProfile,
+    CandidatePayload, FactCandidate, MemoryType, RetrievalCandidate, RetrievalProfile,
 };
 use loom_engine::pipeline::online::weight;
 use loom_engine::types::classification::TaskClass;
 use loom_engine::types::compilation::OutputFormat;
 
-use chrono::Utc;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -35,26 +33,12 @@ fn make_fact_candidate(score: f64) -> RetrievalCandidate {
         memory_type: MemoryType::Semantic,
         payload: CandidatePayload::Fact(FactCandidate {
             subject_id: Uuid::new_v4(),
+            subject_name: "subject".to_string(),
             predicate: "uses".to_string(),
             object_id: Uuid::new_v4(),
+            object_name: "object".to_string(),
             evidence_status: "extracted".to_string(),
             source_episodes: vec![Uuid::new_v4()],
-            namespace: "test".to_string(),
-        }),
-        provenance_mode: None,
-    }
-}
-
-fn make_episode_candidate(score: f64) -> RetrievalCandidate {
-    RetrievalCandidate {
-        id: Uuid::new_v4(),
-        score,
-        source_profile: RetrievalProfile::EpisodeRecall,
-        memory_type: MemoryType::Episodic,
-        payload: CandidatePayload::Episode(EpisodeCandidate {
-            source: "test".to_string(),
-            content: "Test episode content".to_string(),
-            occurred_at: Utc::now(),
             namespace: "test".to_string(),
         }),
         provenance_mode: None,
@@ -208,23 +192,25 @@ fn audit_entry_captures_latency_breakdown() {
     let result = compile::compile_package(input);
 
     // Build audit entry with latency breakdown.
-    let audit = compile::build_audit_entry(
-        &result,
-        "test",
-        &task_class,
-        Some("test query"),
-        Some("claude"),
-        "debug",
-        None,
-        Some(0.95),
-        None,
-        &["fact_lookup".to_string()],
-        Some(150), // total
-        Some(20),  // classify
-        Some(80),  // retrieve
-        Some(30),  // rank
-        Some(20),  // compile
-    );
+    let audit = compile::build_audit_entry(compile::AuditEntryInput {
+        result: &result,
+        namespace: "test",
+        task_class: &task_class,
+        query_text: Some("test query"),
+        target_model: Some("claude"),
+        primary_class: "debug",
+        secondary_class: None,
+        primary_confidence: Some(0.95),
+        secondary_confidence: None,
+        profiles_executed: &["fact_lookup".to_string()],
+        latencies: compile::AuditLatencies {
+            total_ms: Some(150),
+            classify_ms: Some(20),
+            retrieve_ms: Some(80),
+            rank_ms: Some(30),
+            compile_ms: Some(20),
+        },
+    });
 
     assert_eq!(audit.latency_total_ms, Some(150));
     assert_eq!(audit.latency_classify_ms, Some(20));
@@ -421,7 +407,7 @@ fn percentile_empty_dataset() {
 /// Test that duration-based percentile works correctly.
 #[test]
 fn duration_percentile_correctness() {
-    let mut durations: Vec<Duration> = (1..=100).map(|i| Duration::from_millis(i)).collect();
+    let mut durations: Vec<Duration> = (1..=100).map(Duration::from_millis).collect();
     durations.sort();
 
     let p50 = compute_duration_percentile(&durations, 50.0);
@@ -450,15 +436,8 @@ fn duration_percentile_correctness() {
 /// Test percentile with skewed distribution (most values low, few high).
 #[test]
 fn percentile_skewed_distribution() {
-    let mut values: Vec<f64> = Vec::new();
-    // 95 values at 10ms
-    for _ in 0..95 {
-        values.push(10.0);
-    }
-    // 5 values at 500ms (outliers)
-    for _ in 0..5 {
-        values.push(500.0);
-    }
+    let mut values = vec![10.0; 95];
+    values.extend(std::iter::repeat_n(500.0, 5));
     values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let p50 = compute_percentile(&values, 50.0);

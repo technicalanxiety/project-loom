@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn namespace_filter_scopes_to_single_namespace() {
         // Simulate records from multiple namespaces.
-        let records = vec![
+        let records = [
             ("project-a", "entity-1"),
             ("project-a", "entity-2"),
             ("project-b", "entity-3"),
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn namespace_filter_returns_empty_for_unknown_namespace() {
-        let records = vec![("project-a", "entity-1"), ("project-b", "entity-2")];
+        let records = [("project-a", "entity-1"), ("project-b", "entity-2")];
 
         let query_ns = "nonexistent";
         let filtered: Vec<_> = records.iter().filter(|(ns, _)| *ns == query_ns).collect();

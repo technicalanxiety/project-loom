@@ -263,7 +263,7 @@ export async function getBenchmarkDetail(id: string): Promise<BenchmarkCompariso
   return fetchJson<BenchmarkComparison>(`/benchmarks/${encodeURIComponent(id)}`);
 }
 
-/** Trigger a new benchmark run across all A/B/C conditions. */
+/** Start a new benchmark run and return the running row immediately. */
 export async function runBenchmark(): Promise<BenchmarkRun> {
   return postJson<BenchmarkRun>('/benchmarks/run', {});
 }
@@ -276,9 +276,8 @@ export async function seedBenchmark(): Promise<SeedSummary> {
   return postJson<SeedSummary>('/benchmarks/seed', {});
 }
 
-/** Cancel a running benchmark by flipping the row to `failed`. The pipeline
- * keeps executing in the background — partial results that already landed
- * are preserved — but the dashboard's spinner stops. Returns
+/** Cancel a running benchmark by flipping the row to `failed`. The in-flight
+ * condition may finish, then the runner stops before starting more work. Returns
  * `{cancelled: false}` if the run was already in a terminal state. */
 export async function cancelBenchmark(id: string): Promise<CancelBenchmarkResponse> {
   return postJson<CancelBenchmarkResponse>(`/benchmarks/${encodeURIComponent(id)}/cancel`, {});

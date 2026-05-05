@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### Benchmark run lifecycle and verification cleanup
+
+- `POST /dashboard/api/benchmarks/run` now creates a benchmark run row and
+  returns it immediately while the A/B/C benchmark suite executes in a
+  background task. The Benchmarks dashboard polls running run summaries and
+  selected-run detail every 5 seconds, so operators can see partial progress
+  and cancel the active run instead of waiting on one long HTTP request.
+- Benchmark cancellation now stops future benchmark work: the runner checks
+  the run status before every task condition and exits after the current
+  in-flight condition returns. Background benchmark errors are logged and
+  mark the run `failed`.
+- Startup stale-run cleanup now uses a 12-hour threshold instead of 2 hours,
+  avoiding false failures for slow local inference with 300-second LLM
+  request timeouts, retry overhead, or Azure fallback.
+- Cleaned repo verification noise: stale `FactCandidate` test fixtures now
+  include hydrated subject/object names, dashboard formatting is Biome-clean,
+  Rust clippy nits in tests were fixed, benchmark/audit helper APIs were
+  reshaped to avoid high-argument warnings, and the binary target documents
+  its intentional `dead_code` allowance for the mirrored route/helper module
+  graph.
+
 ### Added
 
 #### Bulk "Retry failed" button on the Runtime dashboard

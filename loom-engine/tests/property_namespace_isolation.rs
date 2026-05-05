@@ -9,7 +9,6 @@
 //! **Validates: Requirements 7.1, 7.2, 7.4**
 
 use proptest::prelude::*;
-use uuid::Uuid;
 
 use loom_engine::pipeline::online::namespace::{
     validate_namespace, NamespaceConfig, DEFAULT_NAMESPACE,
@@ -24,30 +23,6 @@ fn namespace_strategy() -> impl Strategy<Value = String> {
 fn distinct_namespaces() -> impl Strategy<Value = (String, String)> {
     (namespace_strategy(), namespace_strategy())
         .prop_filter("namespaces must be distinct", |(a, b)| a != b)
-}
-
-/// The 10 valid entity types.
-const VALID_ENTITY_TYPES: &[&str] = &[
-    "person",
-    "organization",
-    "project",
-    "service",
-    "technology",
-    "pattern",
-    "environment",
-    "document",
-    "metric",
-    "decision",
-];
-
-/// Proptest strategy for selecting a valid entity type.
-fn valid_entity_type() -> impl Strategy<Value = String> {
-    prop::sample::select(VALID_ENTITY_TYPES).prop_map(|s| s.to_string())
-}
-
-/// Proptest strategy for generating entity names.
-fn entity_name() -> impl Strategy<Value = String> {
-    "[a-zA-Z][a-zA-Z0-9_ -]{0,39}".prop_map(|s| s)
 }
 
 // ---------------------------------------------------------------------------
@@ -78,10 +53,8 @@ mod namespace_isolation {
         #[test]
         fn entities_in_different_namespaces_are_isolated(
             (ns_a, ns_b) in distinct_namespaces(),
-            name in entity_name(),
-            entity_type in valid_entity_type(),
         ) {
-            // Simulate two entities with the same name but different namespaces.
+            // Simulate two entities with the same identity but different namespaces.
             // Per Requirement 7.6, the same real-world entity in different
             // namespaces creates separate entity records.
             let entity_a_ns = ns_a.clone();

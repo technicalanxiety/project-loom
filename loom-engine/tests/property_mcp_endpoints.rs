@@ -396,7 +396,6 @@ mod episode_field_completeness {
 /// separation at the configuration level.
 mod connection_pool_separation {
     use loom_engine::config::{AppConfig, LlmConfig};
-    use loom_engine::db::pool::DbPools;
 
     /// Verify that `DbPools` exposes two distinct pool fields.
     ///
@@ -404,14 +403,7 @@ mod connection_pool_separation {
     /// type structure ensures separation at compile time.
     #[test]
     fn db_pools_has_separate_online_and_offline_fields() {
-        // This test verifies the structural contract: DbPools must have
-        // distinct `online` and `offline` fields of type PgPool.
-        // The type system enforces this — if the fields were merged into one,
-        // this test would fail to compile.
-        fn assert_has_separate_pools(_: &DbPools) {}
-
-        // The function signature above proves DbPools has the required structure.
-        // We verify the config correctly routes to separate URLs.
+        // Verify the config correctly routes to separate URLs.
         let config = AppConfig {
             database_url: "postgres://shared:5432/db".to_string(),
             database_url_online: Some("postgres://online:5432/db".to_string()),

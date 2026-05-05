@@ -55,7 +55,7 @@ fn random_query() -> impl Strategy<Value = String> {
 
 /// Proptest strategy for generating a UUID.
 fn uuid_strategy() -> impl Strategy<Value = Uuid> {
-    any::<u128>().prop_map(|n| Uuid::from_u128(n))
+    any::<u128>().prop_map(Uuid::from_u128)
 }
 
 // ---------------------------------------------------------------------------
@@ -601,8 +601,10 @@ mod hard_exclusion_by_weight {
                 RetrievalProfile::FactLookup,
                 CandidatePayload::Fact(FactCandidate {
                     subject_id: Uuid::new_v4(),
+                    subject_name: "subject".to_string(),
                     predicate: "uses".to_string(),
                     object_id: Uuid::new_v4(),
+                    object_name: "object".to_string(),
                     evidence_status: "extracted".to_string(),
                     source_episodes: vec![Uuid::new_v4()],
                     namespace: "default".to_string(),
@@ -748,6 +750,7 @@ mod hard_exclusion_by_weight {
 /// For any ranked candidate list, the final ranking scores should be
 /// computed as (relevance × 0.40) + (recency × 0.25) + (stability × 0.20)
 /// + (provenance × 0.15), and candidates should be sorted in descending
+///
 /// order by final score.
 mod four_dimension_weighted_ranking {
     use super::*;
@@ -780,8 +783,10 @@ mod four_dimension_weighted_ranking {
             memory_type: MemoryType::Semantic,
             payload: CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "subject".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "object".to_string(),
                 evidence_status: "extracted".to_string(),
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
@@ -961,7 +966,7 @@ mod four_dimension_weighted_ranking {
             let final_score = compute_final_score(&scores);
 
             prop_assert!(
-                final_score >= 0.0 && final_score <= 1.0,
+                (0.0..=1.0).contains(&final_score),
                 "Final score {} should be in [0.0, 1.0] for dimensions {:?}",
                 final_score,
                 scores
@@ -1333,8 +1338,10 @@ mod candidate_deduplication {
             memory_type: MemoryType::Semantic,
             payload: CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "subject".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "object".to_string(),
                 evidence_status: "extracted".to_string(),
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
@@ -1373,9 +1380,13 @@ mod candidate_deduplication {
             }
 
             // Add explicit duplicates.
-            for i in 0..num_dupes.min(unique_ids.len()) {
+            for (i, id) in unique_ids
+                .iter()
+                .enumerate()
+                .take(num_dupes.min(unique_ids.len()))
+            {
                 let dup_score = scores.get(i).copied().unwrap_or(0.5);
-                candidates.push(build_ranked_fact(unique_ids[i], dup_score));
+                candidates.push(build_ranked_fact(*id, dup_score));
             }
 
             let input = CompilationInput {
@@ -1700,8 +1711,10 @@ mod output_format_correctness {
             memory_type: MemoryType::Semantic,
             payload: CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "subject".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "object".to_string(),
                 evidence_status: "extracted".to_string(),
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),

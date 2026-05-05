@@ -11,7 +11,6 @@
 
 use chrono::{DateTime, Utc};
 use proptest::prelude::*;
-use uuid::Uuid;
 
 /// Proptest strategy for generating namespace strings.
 fn namespace_strategy() -> impl Strategy<Value = String> {
@@ -23,16 +22,6 @@ fn deletion_reason() -> impl Strategy<Value = String> {
     "[a-zA-Z ]{1,50}".prop_map(|s| s)
 }
 
-/// Proptest strategy for generating content strings.
-fn content_strategy() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9 ]{10,100}".prop_map(|s| s)
-}
-
-/// Proptest strategy for generating entity names.
-fn entity_name() -> impl Strategy<Value = String> {
-    "[a-zA-Z][a-zA-Z0-9_ -]{0,39}".prop_map(|s| s)
-}
-
 /// Simulated record with soft deletion fields.
 ///
 /// Mirrors the common pattern across episodes, entities, facts, and
@@ -40,7 +29,6 @@ fn entity_name() -> impl Strategy<Value = String> {
 /// and `Some(timestamp)` for soft-deleted records.
 #[derive(Debug, Clone)]
 struct SoftDeletableRecord {
-    id: Uuid,
     namespace: String,
     deleted_at: Option<DateTime<Utc>>,
     deletion_reason: Option<String>,
@@ -49,7 +37,6 @@ struct SoftDeletableRecord {
 impl SoftDeletableRecord {
     fn new(namespace: &str) -> Self {
         Self {
-            id: Uuid::new_v4(),
             namespace: namespace.to_string(),
             deleted_at: None,
             deletion_reason: None,

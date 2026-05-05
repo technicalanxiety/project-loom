@@ -408,9 +408,7 @@ mod tests {
     #[test]
     fn truncate_multibyte_unicode_stays_on_char_boundary() {
         // Each '字' is 3 UTF-8 bytes. Build a string slightly over the limit.
-        let text: String = std::iter::repeat('字')
-            .take(EMBED_CHAR_LIMIT + 10)
-            .collect();
+        let text = "字".repeat(EMBED_CHAR_LIMIT + 10);
         let result = truncate_for_embedding(&text);
         assert_eq!(result.chars().count(), EMBED_CHAR_LIMIT);
         // Valid UTF-8 — chars() must not panic.

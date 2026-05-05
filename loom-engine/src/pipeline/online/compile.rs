@@ -200,7 +200,7 @@ pub fn estimate_candidate_tokens(candidate: &RetrievalCandidate) -> usize {
         CandidatePayload::Fact(_) => 50,
         CandidatePayload::Episode(ep) => {
             // ~1 token per 4 characters, clamped to [20, 200].
-            (ep.content.len() / 4).max(20).min(200)
+            (ep.content.len() / 4).clamp(20, 200)
         }
         CandidatePayload::Graph(_) => 30,
         CandidatePayload::Procedure(_) => 40,
@@ -829,58 +829,69 @@ pub fn format_compact(
 // Audit logging
 // ---------------------------------------------------------------------------
 
+/// Latency breakdown captured in the audit log.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuditLatencies {
+    pub total_ms: Option<i32>,
+    pub classify_ms: Option<i32>,
+    pub retrieve_ms: Option<i32>,
+    pub rank_ms: Option<i32>,
+    pub compile_ms: Option<i32>,
+}
+
+/// Input fields for [`build_audit_entry`].
+#[derive(Debug)]
+pub struct AuditEntryInput<'a> {
+    pub result: &'a CompilationResult,
+    pub namespace: &'a str,
+    pub task_class: &'a TaskClass,
+    pub query_text: Option<&'a str>,
+    pub target_model: Option<&'a str>,
+    pub primary_class: &'a str,
+    pub secondary_class: Option<&'a str>,
+    pub primary_confidence: Option<f64>,
+    pub secondary_confidence: Option<f64>,
+    pub profiles_executed: &'a [String],
+    pub latencies: AuditLatencies,
+}
+
 /// Build an audit log entry from compilation results.
 ///
 /// Captures the full compilation trace: classification, retrieval profiles,
 /// candidate decisions, token counts, output format, and latency breakdown.
-pub fn build_audit_entry(
-    result: &CompilationResult,
-    namespace: &str,
-    task_class: &TaskClass,
-    query_text: Option<&str>,
-    target_model: Option<&str>,
-    primary_class: &str,
-    secondary_class: Option<&str>,
-    primary_confidence: Option<f64>,
-    secondary_confidence: Option<f64>,
-    profiles_executed: &[String],
-    latency_total_ms: Option<i32>,
-    latency_classify_ms: Option<i32>,
-    latency_retrieve_ms: Option<i32>,
-    latency_rank_ms: Option<i32>,
-    latency_compile_ms: Option<i32>,
-) -> crate::db::audit::NewAuditEntry {
-    let selected_json = serde_json::to_value(&result.selected_items).ok();
-    let rejected_json = serde_json::to_value(&result.rejected_items).ok();
+pub fn build_audit_entry(input: AuditEntryInput<'_>) -> crate::db::audit::NewAuditEntry {
+    let selected_json = serde_json::to_value(&input.result.selected_items).ok();
+    let rejected_json = serde_json::to_value(&input.result.rejected_items).ok();
 
-    let retrieval_profile = profiles_executed
+    let retrieval_profile = input
+        .profiles_executed
         .first()
         .cloned()
         .unwrap_or_else(|| "none".to_string());
 
     crate::db::audit::NewAuditEntry {
-        task_class: task_class.to_string(),
-        namespace: namespace.to_string(),
-        query_text: query_text.map(|s| s.to_string()),
-        target_model: target_model.map(|s| s.to_string()),
-        primary_class: primary_class.to_string(),
-        secondary_class: secondary_class.map(|s| s.to_string()),
-        primary_confidence,
-        secondary_confidence,
-        profiles_executed: Some(profiles_executed.to_vec()),
+        task_class: input.task_class.to_string(),
+        namespace: input.namespace.to_string(),
+        query_text: input.query_text.map(|s| s.to_string()),
+        target_model: input.target_model.map(|s| s.to_string()),
+        primary_class: input.primary_class.to_string(),
+        secondary_class: input.secondary_class.map(|s| s.to_string()),
+        primary_confidence: input.primary_confidence,
+        secondary_confidence: input.secondary_confidence,
+        profiles_executed: Some(input.profiles_executed.to_vec()),
         retrieval_profile,
-        candidates_found: Some(result.candidates_found),
-        candidates_selected: Some(result.candidates_selected),
-        candidates_rejected: Some(result.candidates_rejected),
+        candidates_found: Some(input.result.candidates_found),
+        candidates_selected: Some(input.result.candidates_selected),
+        candidates_rejected: Some(input.result.candidates_rejected),
         selected_items: selected_json,
         rejected_items: rejected_json,
-        compiled_tokens: Some(result.package.token_count),
-        output_format: Some(result.package.format.to_string()),
-        latency_total_ms,
-        latency_classify_ms,
-        latency_retrieve_ms,
-        latency_rank_ms,
-        latency_compile_ms,
+        compiled_tokens: Some(input.result.package.token_count),
+        output_format: Some(input.result.package.format.to_string()),
+        latency_total_ms: input.latencies.total_ms,
+        latency_classify_ms: input.latencies.classify_ms,
+        latency_retrieve_ms: input.latencies.retrieve_ms,
+        latency_rank_ms: input.latencies.rank_ms,
+        latency_compile_ms: input.latencies.compile_ms,
     }
 }
 
@@ -927,18 +938,6 @@ mod tests {
                 name: name.to_string(),
                 entity_type: entity_type.to_string(),
                 summary: Some(format!("{name} - test project")),
-            }),
-        }
-    }
-
-    fn make_hot_procedure(pattern: &str) -> HotTierItem {
-        HotTierItem {
-            id: Uuid::new_v4(),
-            memory_type: MemoryType::Procedural,
-            payload: HotTierPayload::Procedure(HotProcedure {
-                pattern: pattern.to_string(),
-                confidence: 0.85,
-                observation_count: 5,
             }),
         }
     }
@@ -1431,23 +1430,25 @@ mod tests {
         let input = sample_input();
         let result = compile_package(input);
 
-        let entry = build_audit_entry(
-            &result,
-            "project-sentinel",
-            &TaskClass::Architecture,
-            Some("how does auth work?"),
-            Some("claude-3.5-sonnet"),
-            "architecture",
-            Some("debug"),
-            Some(0.85),
-            Some(0.65),
-            &["fact_lookup".to_string(), "graph_neighborhood".to_string()],
-            Some(250),
-            Some(50),
-            Some(100),
-            Some(60),
-            Some(40),
-        );
+        let entry = build_audit_entry(AuditEntryInput {
+            result: &result,
+            namespace: "project-sentinel",
+            task_class: &TaskClass::Architecture,
+            query_text: Some("how does auth work?"),
+            target_model: Some("claude-3.5-sonnet"),
+            primary_class: "architecture",
+            secondary_class: Some("debug"),
+            primary_confidence: Some(0.85),
+            secondary_confidence: Some(0.65),
+            profiles_executed: &["fact_lookup".to_string(), "graph_neighborhood".to_string()],
+            latencies: AuditLatencies {
+                total_ms: Some(250),
+                classify_ms: Some(50),
+                retrieve_ms: Some(100),
+                rank_ms: Some(60),
+                compile_ms: Some(40),
+            },
+        });
 
         assert_eq!(entry.task_class, "architecture");
         assert_eq!(entry.namespace, "project-sentinel");

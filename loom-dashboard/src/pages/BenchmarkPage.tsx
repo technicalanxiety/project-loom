@@ -17,7 +17,7 @@
  * retrieval-side metrics, and per-condition diagnostics.
  */
 import type React from 'react';
-import { Fragment, useCallback, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import {
   cancelBenchmark,
   getBenchmarkDetail,
@@ -438,6 +438,47 @@ export const BenchmarkPage: React.FC = () => {
   const [seedError, setSeedError] = useState<string | null>(null);
   const [cancellingRun, setCancellingRun] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const hasRunningRun =
+    (runs?.some((run) => run.status === 'running') ?? false) ||
+    selectedRun?.run.status === 'running';
+
+  useEffect(() => {
+    if (!hasRunningRun) return;
+    const interval = window.setInterval(() => {
+      refetch();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [hasRunningRun, refetch]);
+
+  useEffect(() => {
+    const runId = selectedRun?.run.status === 'running' ? selectedRun.run.id : null;
+    if (!runId) return;
+
+    let cancelled = false;
+    const refreshDetail = async () => {
+      try {
+        const detail = await getBenchmarkDetail(runId);
+        if (!cancelled) {
+          setSelectedRun(detail);
+          setDetailError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Failed to refresh benchmark detail';
+          setDetailError(message);
+        }
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void refreshDetail();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [selectedRun?.run.id, selectedRun?.run.status]);
 
   const handleSelectRun = useCallback(async (run: BenchmarkRun) => {
     setDetailLoading(true);
@@ -455,6 +496,7 @@ export const BenchmarkPage: React.FC = () => {
 
   const handleRunBenchmark = useCallback(async () => {
     setRunningBenchmark(true);
+    setDetailError(null);
     try {
       const newRun = await runBenchmark();
       refetch();
@@ -489,6 +531,16 @@ export const BenchmarkPage: React.FC = () => {
       try {
         await cancelBenchmark(id);
         refetch();
+        if (selectedRun?.run.id === id) {
+          try {
+            const detail = await getBenchmarkDetail(id);
+            setSelectedRun(detail);
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : 'Failed to refresh benchmark detail';
+            setDetailError(message);
+          }
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to cancel benchmark run';
         setCancelError(message);
@@ -496,7 +548,7 @@ export const BenchmarkPage: React.FC = () => {
         setCancellingRun(null);
       }
     },
-    [refetch],
+    [refetch, selectedRun?.run.id],
   );
 
   return (
@@ -524,9 +576,18 @@ export const BenchmarkPage: React.FC = () => {
             type="button"
             className="btn btn-primary"
             onClick={handleRunBenchmark}
-            disabled={runningBenchmark}
+            disabled={runningBenchmark || hasRunningRun}
+            title={
+              hasRunningRun
+                ? 'A benchmark is already running. Cancel it or wait for it to finish before starting another.'
+                : 'Start a new benchmark run and show progress in the run list.'
+            }
           >
-            {runningBenchmark ? 'Running…' : 'Run new benchmark'}
+            {runningBenchmark
+              ? 'Starting…'
+              : hasRunningRun
+                ? 'Benchmark running…'
+                : 'Run new benchmark'}
           </button>
         </div>
       </div>
@@ -614,7 +675,7 @@ export const BenchmarkPage: React.FC = () => {
                             e.stopPropagation();
                             handleCancel(run.id);
                           }}
-                          title="Mark this stuck run as failed. The pipeline keeps running in the background but the spinner stops."
+                          title="Mark this stuck run as failed. The current condition may finish, then the benchmark stops."
                         >
                           {cancellingRun === run.id ? 'Cancelling…' : 'Cancel'}
                         </button>

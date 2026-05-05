@@ -68,6 +68,13 @@ use crate::types::benchmark::{
 use crate::types::classification::TaskClass;
 use crate::types::compilation::OutputFormat;
 
+/// Startup reaper threshold for orphaned benchmark rows.
+///
+/// Benchmarks now run detached from the HTTP request that created them, so the
+/// reaper only handles process crashes/restarts. Keep the threshold comfortably
+/// beyond slow local inference and retry/fallback overhead.
+pub const STALE_BENCHMARK_REAP_HOURS: i64 = 12;
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -995,6 +1002,13 @@ pub async fn execute_benchmark(
     config: &AppConfig,
 ) -> Result<BenchmarkRunSummary, BenchmarkError> {
     let pool = &pools.online;
+    let run = create_benchmark_run(pool).await?;
+    execute_benchmark_run(pools, llm_client, config, run.id).await
+}
+
+/// Create a benchmark run row and return immediately. The caller is expected
+/// to hand the id to [`execute_benchmark_run`] in a background task.
+pub async fn create_benchmark_run(pool: &PgPool) -> Result<BenchmarkRunSummary, BenchmarkError> {
     let run_id = Uuid::new_v4();
     let run_name = format!("Benchmark {}", Utc::now().format("%Y-%m-%d %H:%M"));
     let now = Utc::now();
@@ -1008,45 +1022,43 @@ pub async fn execute_benchmark(
     .execute(pool)
     .await?;
 
+    Ok(BenchmarkRunSummary {
+        id: run_id,
+        name: run_name,
+        created_at: now,
+        status: "running".to_string(),
+    })
+}
+
+/// Execute an existing benchmark run. The row must already exist and be in
+/// `running` status; cancellation is observed between conditions by checking
+/// that status before starting more retrieval/LLM work.
+pub async fn execute_benchmark_run(
+    pools: &DbPools,
+    llm_client: &LlmClient,
+    config: &AppConfig,
+    run_id: Uuid,
+) -> Result<BenchmarkRunSummary, BenchmarkError> {
+    let pool = &pools.online;
     let tasks = benchmark_tasks();
 
     for task in &tasks {
-        let conditions: [(BenchmarkCondition, CondResult); 3] = [
-            (
-                BenchmarkCondition::A,
-                run_condition_a(task, llm_client, config).await,
-            ),
-            (
-                BenchmarkCondition::B,
-                run_condition_b(task, pool, llm_client, config).await,
-            ),
-            (
-                BenchmarkCondition::C,
-                run_condition_c(task, pool, llm_client, config).await,
-            ),
-        ];
+        for condition in [
+            BenchmarkCondition::A,
+            BenchmarkCondition::B,
+            BenchmarkCondition::C,
+        ] {
+            if !benchmark_run_is_running(pool, run_id).await? {
+                return fetch_benchmark_run_summary(pool, run_id).await;
+            }
 
-        for (condition, (precision, token_count, task_success, latency_ms, details)) in conditions {
-            sqlx::query(
-                r#"
-                INSERT INTO loom_benchmark_results
-                    (id, run_id, task_name, condition, precision, token_count,
-                     task_success, latency_ms, details, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(run_id)
-            .bind(&task.name)
-            .bind(condition.to_string())
-            .bind(precision)
-            .bind(token_count)
-            .bind(task_success)
-            .bind(latency_ms)
-            .bind(&details)
-            .bind(Utc::now())
-            .execute(pool)
-            .await?;
+            let result = match condition {
+                BenchmarkCondition::A => run_condition_a(task, llm_client, config).await,
+                BenchmarkCondition::B => run_condition_b(task, pool, llm_client, config).await,
+                BenchmarkCondition::C => run_condition_c(task, pool, llm_client, config).await,
+            };
+
+            insert_benchmark_result(pool, run_id, task, condition, result).await?;
         }
     }
 
@@ -1056,7 +1068,7 @@ pub async fn execute_benchmark(
     // finishing, and the partial per-task results that did land remain
     // queryable. The returned status reflects the post-update state so the
     // HTTP caller sees the truth.
-    let final_status: Option<String> = sqlx::query_scalar(
+    let _final_status: Option<String> = sqlx::query_scalar(
         "UPDATE loom_benchmark_runs \
          SET status = 'completed' \
          WHERE id = $1 AND status = 'running' \
@@ -1066,25 +1078,78 @@ pub async fn execute_benchmark(
     .fetch_optional(pool)
     .await?;
 
-    let status = final_status.unwrap_or_else(|| "failed".to_string());
+    fetch_benchmark_run_summary(pool, run_id).await
+}
+
+async fn insert_benchmark_result(
+    pool: &PgPool,
+    run_id: Uuid,
+    task: &BenchmarkTask,
+    condition: BenchmarkCondition,
+    result: CondResult,
+) -> Result<(), BenchmarkError> {
+    let (precision, token_count, task_success, latency_ms, details) = result;
+
+    sqlx::query(
+        r#"
+        INSERT INTO loom_benchmark_results
+            (id, run_id, task_name, condition, precision, token_count,
+             task_success, latency_ms, details, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(run_id)
+    .bind(&task.name)
+    .bind(condition.to_string())
+    .bind(precision)
+    .bind(token_count)
+    .bind(task_success)
+    .bind(latency_ms)
+    .bind(&details)
+    .bind(Utc::now())
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn benchmark_run_is_running(pool: &PgPool, run_id: Uuid) -> Result<bool, BenchmarkError> {
+    let status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM loom_benchmark_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(matches!(status.as_deref(), Some("running")))
+}
+
+async fn fetch_benchmark_run_summary(
+    pool: &PgPool,
+    run_id: Uuid,
+) -> Result<BenchmarkRunSummary, BenchmarkError> {
+    let row = sqlx::query_as::<_, BenchmarkRunRow>(
+        "SELECT id, name, created_at, status FROM loom_benchmark_runs WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(BenchmarkError::NotFound(run_id))?;
+
     Ok(BenchmarkRunSummary {
-        id: run_id,
-        name: run_name,
-        created_at: now,
-        status,
+        id: row.id,
+        name: row.name,
+        created_at: row.created_at,
+        status: row.status,
     })
 }
 
 /// Mark all `running` benchmark rows older than `threshold_hours` as
 /// `failed`. Call once at engine startup to clean up runs orphaned by a
-/// previous container restart, browser disconnect, or panic — `running` is
-/// a permanent state otherwise because nothing else moves the row out of
-/// it.
+/// previous container restart or panic.
 ///
-/// Threshold is 2 hours by default in `main.rs`. With 30 LLM calls per
-/// benchmark and a 300 s per-call timeout, the worst-case legitimate
-/// runtime is well under that even on iGPU; anything older is
-/// pathologically stuck.
+/// Threshold is [`STALE_BENCHMARK_REAP_HOURS`] by default in `main.rs`.
+/// Anything older than that was almost certainly orphaned by a previous
+/// process rather than still executing.
 pub async fn reap_stale_benchmark_runs(
     pool: &PgPool,
     threshold_hours: i64,
@@ -1112,18 +1177,11 @@ pub async fn reap_stale_benchmark_runs(
     Ok(count)
 }
 
-/// Cancel a `running` benchmark by flipping its row to `failed`. The
-/// running pipeline is *not* aborted — that would require plumbing a
-/// cancellation token through every retrieval and LLM call — so the
-/// engine keeps doing the work it's already started, but the dashboard
-/// stops showing the spinner and the conditional UPDATE in
-/// `execute_benchmark` won't override the cancelled state when the loop
-/// finishes. For single-operator infra, "I clicked cancel, the visible
-/// state changes immediately" is good enough.
+/// Mark a `running` benchmark as `failed`.
 ///
-/// Returns `true` if the row was running and is now failed, `false` if
-/// the row was already in a terminal state (no-op).
-pub async fn cancel_benchmark_run(pool: &PgPool, run_id: Uuid) -> Result<bool, BenchmarkError> {
+/// The runner observes this status between conditions, so cancellation stops
+/// future retrieval/LLM work after the in-flight condition returns.
+pub async fn mark_benchmark_failed(pool: &PgPool, run_id: Uuid) -> Result<bool, BenchmarkError> {
     let updated: Option<(Uuid,)> = sqlx::query_as(
         "UPDATE loom_benchmark_runs \
          SET status = 'failed' \
@@ -1134,6 +1192,16 @@ pub async fn cancel_benchmark_run(pool: &PgPool, run_id: Uuid) -> Result<bool, B
     .fetch_optional(pool)
     .await?;
     Ok(updated.is_some())
+}
+
+/// Cancel a `running` benchmark by flipping its row to `failed`. The
+/// in-flight condition may finish, but the runner checks status before every
+/// subsequent condition and exits without consuming more model time.
+///
+/// Returns `true` if the row was running and is now failed, `false` if
+/// the row was already in a terminal state (no-op).
+pub async fn cancel_benchmark_run(pool: &PgPool, run_id: Uuid) -> Result<bool, BenchmarkError> {
+    mark_benchmark_failed(pool, run_id).await
 }
 
 /// List all benchmark runs ordered by most recent first.

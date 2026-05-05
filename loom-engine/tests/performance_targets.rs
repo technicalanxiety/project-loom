@@ -17,7 +17,7 @@ use loom_engine::pipeline::online::classify::{self, ClassifyStageOutput};
 use loom_engine::pipeline::online::compile::{
     self, CompilationInput, HotFact, HotTierItem, HotTierPayload,
 };
-use loom_engine::pipeline::online::rank::{self, RankedCandidate};
+use loom_engine::pipeline::online::rank;
 use loom_engine::pipeline::online::retrieve::{
     CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType, RetrievalCandidate,
     RetrievalProfile,
@@ -51,8 +51,10 @@ fn mock_candidates(count: usize) -> Vec<RetrievalCandidate> {
                     memory_type: MemoryType::Semantic,
                     payload: CandidatePayload::Fact(FactCandidate {
                         subject_id: Uuid::new_v4(),
+                        subject_name: "subject".to_string(),
                         predicate: "uses".to_string(),
                         object_id: Uuid::new_v4(),
+                        object_name: "object".to_string(),
                         evidence_status: "extracted".to_string(),
                         source_episodes: vec![Uuid::new_v4()],
                         namespace: "test".to_string(),
@@ -305,7 +307,7 @@ fn hundred_pipelines_per_minute() {
 /// Validate percentile calculation correctness.
 #[test]
 fn percentile_calculation_correctness() {
-    let durations: Vec<Duration> = (1..=100).map(|i| Duration::from_millis(i)).collect();
+    let durations: Vec<Duration> = (1..=100).map(Duration::from_millis).collect();
 
     let p50 = percentile(&durations, 50.0);
     let p95 = percentile(&durations, 95.0);

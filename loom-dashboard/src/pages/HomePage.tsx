@@ -10,14 +10,17 @@ function inferMode(source: string): 'live' | 'seed' | 'vendor' {
 }
 
 const MODE_COLOR: Record<string, string> = {
-  live:   'var(--moss-600)',
-  seed:   'var(--saffron-500)',
+  live: 'var(--moss-600)',
+  seed: 'var(--saffron-500)',
   vendor: 'var(--indigo-400)',
 };
 
-const BreakdownPanel: React.FC<{ title: string; meta: string; items: CountByKey[]; colorFn?: (key: string) => string }> = ({
-  title, meta, items, colorFn,
-}) => {
+const BreakdownPanel: React.FC<{
+  title: string;
+  meta: string;
+  items: CountByKey[];
+  colorFn?: (key: string) => string;
+}> = ({ title, meta, items, colorFn }) => {
   const max = Math.max(...items.map((i) => i.count), 1);
   return (
     <section className="panel">
@@ -74,7 +77,11 @@ export const HomePage: React.FC = () => {
               <div className="kpi-value numeric">{data.facts_superseded.toLocaleString()}</div>
               {data.facts_current > 0 && (
                 <div className="kpi-sub">
-                  {((data.facts_superseded / (data.facts_current + data.facts_superseded)) * 100).toFixed(1)}% of total
+                  {(
+                    (data.facts_superseded / (data.facts_current + data.facts_superseded)) *
+                    100
+                  ).toFixed(1)}
+                  % of total
                 </div>
               )}
             </div>

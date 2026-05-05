@@ -1299,7 +1299,7 @@ mod tests {
     fn alias_dedup_case_insensitive() {
         // Validates: Requirement 42.3
         // Simulate the alias dedup logic from pass2_alias_match.
-        let existing_aliases = vec!["K8s".to_string(), "kube".to_string()];
+        let existing_aliases = ["K8s".to_string(), "kube".to_string()];
         let new_name = "k8s"; // same as "K8s" case-insensitively
 
         let lowercase_name = new_name.to_lowercase();
@@ -1312,7 +1312,7 @@ mod tests {
 
     #[test]
     fn alias_dedup_allows_new_alias() {
-        let existing_aliases = vec!["K8s".to_string(), "kube".to_string()];
+        let existing_aliases = ["K8s".to_string(), "kube".to_string()];
         let new_name = "Kubernetes";
 
         let lowercase_name = new_name.to_lowercase();
@@ -1364,7 +1364,7 @@ mod tests {
     fn conflict_candidates_json_structure() {
         // Validates: Requirement 23.1, 23.2
         // Verify the JSON structure produced by log_resolution_conflict.
-        let candidates = vec![
+        let candidates = [
             make_candidate("ServiceA", 0.95),
             make_candidate("ServiceB", 0.94),
         ];

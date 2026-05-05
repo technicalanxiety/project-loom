@@ -26,7 +26,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use pgvector::Vector;
 use sqlx::PgPool;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -35,7 +34,9 @@ use uuid::Uuid;
 use crate::config::LlmConfig;
 use crate::db::episodes::{self, EpisodeError};
 use crate::llm::client::LlmClient;
-use crate::llm::embeddings::{self, EmbeddingError};
+#[cfg(test)]
+use crate::llm::embeddings;
+use crate::llm::embeddings::EmbeddingError;
 use crate::pipeline::offline::extract::{self as extract_pipeline, PipelineError};
 use crate::types::episode::Episode;
 
@@ -415,15 +416,18 @@ pub async fn process_single_episode(
 // ---------------------------------------------------------------------------
 
 /// Maximum number of embedding retry attempts before giving up.
+#[cfg(test)]
 const EMBEDDING_MAX_RETRIES: u32 = 3;
 
 /// Base delay between embedding retries (doubles each attempt).
+#[cfg(test)]
 const EMBEDDING_RETRY_BASE: Duration = Duration::from_millis(500);
 
 /// Generate an episode embedding with retry logic.
 ///
 /// Retries up to [`EMBEDDING_MAX_RETRIES`] times with exponential backoff
 /// on transient failures. Logs each retry attempt.
+#[cfg(test)]
 async fn generate_episode_embedding_with_retry(
     client: &LlmClient,
     config: &LlmConfig,

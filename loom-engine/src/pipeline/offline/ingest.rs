@@ -71,6 +71,21 @@ pub struct IngestResult {
     pub status: String,
 }
 
+/// Input fields for [`ingest_episode`].
+#[derive(Debug)]
+pub struct IngestEpisodeInput<'a> {
+    pub content: &'a str,
+    pub source: &'a str,
+    pub namespace: &'a str,
+    pub source_event_id: Option<&'a str>,
+    pub occurred_at: chrono::DateTime<chrono::Utc>,
+    pub metadata: Option<serde_json::Value>,
+    pub participants: Option<Vec<String>>,
+    pub ingestion_mode: IngestionMode,
+    pub parser_version: Option<String>,
+    pub parser_source_schema: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -140,49 +155,40 @@ pub fn validate_episode_input(
 ///   remains unprocessed (`processed = false`) for retry.
 /// - All errors are logged via tracing with span context.
 #[tracing::instrument(
-    skip(pool, content, metadata, participants),
+    skip(pool, input),
     fields(
-        namespace = %namespace,
-        source = %source,
+        namespace = %input.namespace,
+        source = %input.source,
     )
 )]
 pub async fn ingest_episode(
     pool: &PgPool,
-    content: &str,
-    source: &str,
-    namespace: &str,
-    source_event_id: Option<&str>,
-    occurred_at: chrono::DateTime<chrono::Utc>,
-    metadata: Option<serde_json::Value>,
-    participants: Option<Vec<String>>,
-    ingestion_mode: IngestionMode,
-    parser_version: Option<String>,
-    parser_source_schema: Option<String>,
+    input: IngestEpisodeInput<'_>,
 ) -> Result<IngestResult, IngestError> {
     // Step 1: Validate input.
-    validate_episode_input(content, source, namespace)?;
+    validate_episode_input(input.content, input.source, input.namespace)?;
     crate::types::ingestion::validate_parser_fields(
-        ingestion_mode,
-        parser_version.as_deref(),
-        parser_source_schema.as_deref(),
+        input.ingestion_mode,
+        input.parser_version.as_deref(),
+        input.parser_source_schema.as_deref(),
     )
     .map_err(IngestError::InvalidData)?;
 
-    let content_hash = compute_content_hash(content);
+    let content_hash = compute_content_hash(input.content);
 
     // Step 2: Check for duplicate by content_hash + namespace.
     let existing_by_hash: Option<Episode> = sqlx::query_as(
         "SELECT * FROM loom_episodes WHERE content_hash = $1 AND namespace = $2 LIMIT 1",
     )
     .bind(&content_hash)
-    .bind(namespace)
+    .bind(input.namespace)
     .fetch_optional(pool)
     .await?;
 
     if let Some(existing) = existing_by_hash {
         tracing::info!(
             episode_id = %existing.id,
-            namespace = %namespace,
+            namespace = %input.namespace,
             "duplicate episode detected (content_hash match)"
         );
         return Ok(IngestResult {
@@ -193,18 +199,18 @@ pub async fn ingest_episode(
 
     // Step 3: Insert episode (handles namespace+source+source_event_id dedup).
     let new_ep = NewEpisode {
-        source: source.to_string(),
+        source: input.source.to_string(),
         source_id: None,
-        source_event_id: source_event_id.map(|s| s.to_string()),
-        content: content.to_string(),
+        source_event_id: input.source_event_id.map(|s| s.to_string()),
+        content: input.content.to_string(),
         content_hash,
-        occurred_at,
-        namespace: namespace.to_string(),
-        metadata,
-        participants,
-        ingestion_mode: ingestion_mode.to_string(),
-        parser_version,
-        parser_source_schema,
+        occurred_at: input.occurred_at,
+        namespace: input.namespace.to_string(),
+        metadata: input.metadata,
+        participants: input.participants,
+        ingestion_mode: input.ingestion_mode.to_string(),
+        parser_version: input.parser_version,
+        parser_source_schema: input.parser_source_schema,
     };
 
     match episodes::insert_episode(pool, &new_ep).await {
@@ -217,8 +223,8 @@ pub async fn ingest_episode(
 
             tracing::info!(
                 episode_id = %episode.id,
-                namespace = %namespace,
-                source = %source,
+                namespace = %input.namespace,
+                source = %input.source,
                 status = %status,
                 "episode ingested"
             );
@@ -234,16 +240,16 @@ pub async fn ingest_episode(
             // Constraint violations are treated as duplicates.
             if let IngestError::ConstraintViolation(ref msg) = ingest_err {
                 tracing::info!(
-                    namespace = %namespace,
-                    source = %source,
+                    namespace = %input.namespace,
+                    source = %input.source,
                     error = %msg,
                     "constraint violation treated as duplicate"
                 );
 
                 // Try to find the existing episode by namespace+source+source_event_id.
-                if let Some(event_id) = source_event_id {
+                if let Some(event_id) = input.source_event_id {
                     if let Ok(Some(existing)) =
-                        find_by_source_event(pool, namespace, source, event_id).await
+                        find_by_source_event(pool, input.namespace, input.source, event_id).await
                     {
                         return Ok(IngestResult {
                             episode_id: existing.id,
@@ -257,8 +263,8 @@ pub async fn ingest_episode(
             }
 
             tracing::error!(
-                namespace = %namespace,
-                source = %source,
+                namespace = %input.namespace,
+                source = %input.source,
                 error = %ingest_err,
                 "episode ingestion failed"
             );

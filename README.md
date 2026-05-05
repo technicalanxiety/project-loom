@@ -725,7 +725,8 @@ All dashboard endpoints are under `/dashboard/api/`. Requests flow through Caddy
 | POST | `/dashboard/api/episodes/failed/requeue-all` | Bulk-reset every episode in `failed` state. Backs the Runtime page's "Retry failed" button. Returns `{requeued: <count>}`. |
 | GET | `/dashboard/api/benchmarks` | List benchmark runs (most recent first) |
 | GET | `/dashboard/api/benchmarks/{id}` | Benchmark comparison detail (A/B/C conditions per task) |
-| POST | `/dashboard/api/benchmarks/run` | Trigger a new benchmark run |
+| POST | `/dashboard/api/benchmarks/run` | Create a benchmark run row and return it immediately while the run continues in the background |
+| POST | `/dashboard/api/benchmarks/{id}/cancel` | Mark a running benchmark as failed so the runner stops before starting the next task condition |
 | GET | `/dashboard/api/stream/telemetry` | Server-Sent Events stream — `TelemetrySnapshot` every 1 s. Powers the Runtime page. |
 
 ---

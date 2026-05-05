@@ -705,8 +705,7 @@ mod tests {
     #[test]
     fn source_is_forced_to_manual() {
         // Simulate the mutation in handle_api_learn.
-        let mut source = "claude-code".to_string();
-        source = "manual".to_string();
+        let source = "manual".to_string();
         assert_eq!(source, "manual");
     }
 

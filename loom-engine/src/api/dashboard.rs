@@ -66,7 +66,7 @@ const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
 
 fn clamp_limit(limit: Option<i64>) -> i64 {
-    limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT).max(1)
+    limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
 }
 
 fn default_offset(offset: Option<i64>) -> i64 {
@@ -2128,22 +2128,56 @@ pub async fn handle_benchmark_detail(
     Ok(Json(comparison))
 }
 
-/// Trigger a new benchmark run. Executes all 10+ tasks across A/B/C conditions.
+/// Trigger a new benchmark run and return its id immediately.
 ///
 /// Runs the real embedding + retrieval + compilation pipeline for conditions B
-/// and C. Requires the embedding model to be reachable. May take several
-/// minutes on iGPU hosts.
+/// and C in a background task. Requires the embedding model to be reachable.
+/// May take several minutes on iGPU hosts.
 pub async fn handle_run_benchmark(
     State(state): State<AppState>,
 ) -> Result<Json<crate::types::benchmark::BenchmarkRunSummary>, DashboardError> {
-    let run = crate::pipeline::benchmark::execute_benchmark(
-        &state.pools,
-        &state.llm_client,
-        &state.config,
-    )
-    .await
-    .map_err(|e| DashboardError::Database(e.to_string()))?;
-    tracing::info!(run_id = %run.id, name = %run.name, "benchmark run completed");
+    let run = crate::pipeline::benchmark::create_benchmark_run(&state.pools.online)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+
+    let run_id = run.id;
+    let pools = state.pools.clone();
+    let llm_client = state.llm_client.clone();
+    let config = state.config.clone();
+
+    tokio::spawn(async move {
+        match crate::pipeline::benchmark::execute_benchmark_run(
+            &pools,
+            &llm_client,
+            &config,
+            run_id,
+        )
+        .await
+        {
+            Ok(done) => {
+                tracing::info!(
+                    run_id = %done.id,
+                    status = %done.status,
+                    name = %done.name,
+                    "benchmark run finished"
+                );
+            }
+            Err(e) => {
+                tracing::error!(run_id = %run_id, error = %e, "benchmark run failed");
+                if let Err(mark_err) =
+                    crate::pipeline::benchmark::mark_benchmark_failed(&pools.online, run_id).await
+                {
+                    tracing::error!(
+                        run_id = %run_id,
+                        error = %mark_err,
+                        "failed to mark benchmark run failed"
+                    );
+                }
+            }
+        }
+    });
+
+    tracing::info!(run_id = %run.id, name = %run.name, "benchmark run started");
     Ok(Json(run))
 }
 
@@ -2176,10 +2210,8 @@ pub struct CancelBenchmarkResponse {
     pub cancelled: bool,
 }
 
-/// Cancel a running benchmark by marking the row as `failed`. The pipeline
-/// continues executing in the background — partial per-task results that
-/// already landed are preserved. The dashboard's running spinner stops
-/// immediately on success.
+/// Cancel a running benchmark by marking the row as `failed`. The in-flight
+/// condition may finish, then the runner stops before starting more work.
 pub async fn handle_cancel_benchmark(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,

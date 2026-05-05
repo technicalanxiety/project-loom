@@ -293,7 +293,7 @@ async fn api_learn_forces_source_to_manual() {
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let source: Option<String> =
         sqlx::query_scalar("SELECT source FROM loom_episodes WHERE content LIKE $1 LIMIT 1")
-            .bind(format!("source override test%"))
+            .bind("source override test%".to_string())
             .fetch_optional(&pool)
             .await
             .unwrap();

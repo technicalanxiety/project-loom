@@ -572,7 +572,7 @@ mod fact_supersession {
                 valid_from: Utc::now(),
             };
 
-            let superseded = detect_supersessions(&[old_fact.clone()], &new_fact);
+            let superseded = detect_supersessions(std::slice::from_ref(&old_fact), &new_fact);
 
             // Property: exactly one fact should be superseded.
             prop_assert_eq!(

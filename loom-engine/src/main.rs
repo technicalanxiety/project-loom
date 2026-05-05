@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Binary target mirrors lib modules; route/helper APIs are intentionally sparse-used here.
+
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
@@ -80,11 +82,14 @@ async fn main() {
     }
 
     // Sweep stale benchmark runs left over from a previous container
-    // restart, browser disconnect, or panic. The threshold (2 hours) is
-    // well past the worst-case legitimate runtime even on iGPU; anything
-    // older was orphaned, not running. Failure is logged but non-fatal —
-    // a missing sweep just leaves stuck-spinner rows visible.
-    match pipeline::benchmark::reap_stale_benchmark_runs(&pools.online, 2).await {
+    // restart or panic. Failure is logged but non-fatal — a missing sweep
+    // just leaves stuck-spinner rows visible.
+    match pipeline::benchmark::reap_stale_benchmark_runs(
+        &pools.online,
+        pipeline::benchmark::STALE_BENCHMARK_REAP_HOURS,
+    )
+    .await
+    {
         Ok(0) => {}
         Ok(n) => tracing::info!(reaped = n, "marked stale benchmark runs as failed"),
         Err(e) => tracing::warn!("benchmark reaper failed: {e}"),

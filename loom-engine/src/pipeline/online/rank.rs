@@ -352,7 +352,7 @@ fn estimate_tokens(candidate: &RetrievalCandidate) -> usize {
         CandidatePayload::Fact(_) => 50,
         CandidatePayload::Episode(ep) => {
             // Rough estimate: 1 token per 4 characters.
-            (ep.content.len() / 4).max(20).min(200)
+            (ep.content.len() / 4).clamp(20, 200)
         }
         CandidatePayload::Graph(_) => 30,
         CandidatePayload::Procedure(_) => 40,

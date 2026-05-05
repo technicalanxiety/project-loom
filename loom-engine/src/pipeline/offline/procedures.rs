@@ -803,8 +803,10 @@ mod tests {
     fn pattern_similarity_threshold_is_reasonable() {
         // Threshold should be high enough to avoid false matches but not
         // so high that legitimate duplicates are missed.
-        assert!(PATTERN_SIMILARITY_THRESHOLD > 0.8);
-        assert!(PATTERN_SIMILARITY_THRESHOLD < 0.95);
+        const {
+            assert!(PATTERN_SIMILARITY_THRESHOLD > 0.8);
+            assert!(PATTERN_SIMILARITY_THRESHOLD < 0.95);
+        }
     }
 
     #[test]

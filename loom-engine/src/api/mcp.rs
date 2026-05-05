@@ -412,28 +412,31 @@ pub async fn handle_loom_think(
     // -----------------------------------------------------------------------
     // Stage 9: Write audit log
     // -----------------------------------------------------------------------
-    let audit_entry = compile::build_audit_entry(
-        &compilation_result,
-        &req.namespace,
+    let primary_class = classify_output.result.primary_class.to_string();
+    let secondary_class = classify_output
+        .result
+        .secondary_class
+        .as_ref()
+        .map(|c| c.to_string());
+    let audit_entry = compile::build_audit_entry(compile::AuditEntryInput {
+        result: &compilation_result,
+        namespace: &req.namespace,
         task_class,
-        Some(&req.query),
-        Some(&target_model),
-        &classify_output.result.primary_class.to_string(),
-        classify_output
-            .result
-            .secondary_class
-            .as_ref()
-            .map(|c| c.to_string())
-            .as_deref(),
-        classify_output.result.primary_confidence.into(),
-        classify_output.result.secondary_confidence,
-        &profile_names,
-        Some(latency_total_ms),
-        Some(latency_classify_ms),
-        Some(latency_retrieve_ms),
-        Some(latency_rank_ms),
-        Some(latency_compile_ms),
-    );
+        query_text: Some(&req.query),
+        target_model: Some(&target_model),
+        primary_class: &primary_class,
+        secondary_class: secondary_class.as_deref(),
+        primary_confidence: classify_output.result.primary_confidence.into(),
+        secondary_confidence: classify_output.result.secondary_confidence,
+        profiles_executed: &profile_names,
+        latencies: compile::AuditLatencies {
+            total_ms: Some(latency_total_ms),
+            classify_ms: Some(latency_classify_ms),
+            retrieve_ms: Some(latency_retrieve_ms),
+            rank_ms: Some(latency_rank_ms),
+            compile_ms: Some(latency_compile_ms),
+        },
+    });
 
     let pool = state.pools.online.clone();
     tokio::spawn(async move {
