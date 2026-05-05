@@ -110,12 +110,9 @@ fn make_fact(
 fn filter_current_facts<'a>(facts: &'a [Fact], namespace: &str) -> Vec<&'a Fact> {
     facts
         .iter()
-        .filter(|f| {
-            f.namespace == namespace && f.valid_until.is_none() && f.deleted_at.is_none()
-        })
+        .filter(|f| f.namespace == namespace && f.valid_until.is_none() && f.deleted_at.is_none())
         .collect()
 }
-
 
 // ---------------------------------------------------------------------------
 // Property 4: Entity Type Constraint
@@ -231,7 +228,6 @@ mod entity_type_constraint {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Property 11: Pack-Aware Predicate Promotion
 // ---------------------------------------------------------------------------
@@ -266,10 +262,7 @@ mod pack_aware_predicate_promotion {
 
     /// Simulate the promotion validation: when promoting a custom predicate,
     /// the target pack must be in the set of valid packs.
-    fn validate_promotion(
-        candidate: &PredicateCandidate,
-        valid_packs: &HashSet<String>,
-    ) -> bool {
+    fn validate_promotion(candidate: &PredicateCandidate, valid_packs: &HashSet<String>) -> bool {
         match &candidate.promoted_to_pack {
             Some(pack) => valid_packs.contains(pack),
             None => false, // Not promoted — no pack to validate.
@@ -377,7 +370,6 @@ mod pack_aware_predicate_promotion {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Property 13: Current Fact Filtering
@@ -548,7 +540,6 @@ mod current_fact_filtering {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Property 28: Evidence Status Validity
 // ---------------------------------------------------------------------------
@@ -656,7 +647,6 @@ mod evidence_status_validity {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Property 29: Fact Provenance Non-Empty
 // ---------------------------------------------------------------------------
@@ -742,7 +732,6 @@ mod fact_provenance_non_empty {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Property 30: Alias Deduplication

@@ -55,7 +55,10 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     }
     // XOR all bytes and accumulate into a single value. Any non-zero result
     // means at least one byte differed.
-    let diff: u8 = a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    let diff: u8 = a
+        .iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y));
     diff == 0
 }
 
@@ -185,29 +188,20 @@ mod tests {
     #[tokio::test]
     async fn valid_token_returns_200() {
         let app = test_app("secret");
-        assert_eq!(
-            send(app, Some("Bearer secret")).await,
-            StatusCode::OK
-        );
+        assert_eq!(send(app, Some("Bearer secret")).await, StatusCode::OK);
     }
 
     #[tokio::test]
     async fn empty_token_returns_401() {
         let app = test_app("secret");
-        assert_eq!(
-            send(app, Some("Bearer ")).await,
-            StatusCode::UNAUTHORIZED
-        );
+        assert_eq!(send(app, Some("Bearer ")).await, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn bearer_prefix_only_returns_401() {
         let app = test_app("secret");
         // "Bearer " with nothing after — submitted token is ""
-        assert_eq!(
-            send(app, Some("Bearer ")).await,
-            StatusCode::UNAUTHORIZED
-        );
+        assert_eq!(send(app, Some("Bearer ")).await, StatusCode::UNAUTHORIZED);
     }
 
     // -- constant_time_eq unit tests ----------------------------------------

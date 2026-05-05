@@ -133,10 +133,7 @@ pub fn profiles_for_class(class: &TaskClass) -> Vec<RetrievalProfile> {
 /// ]);
 /// assert!(profiles.len() <= 3);
 /// ```
-pub fn merge_profiles(
-    primary: &TaskClass,
-    secondary: Option<&TaskClass>,
-) -> Vec<RetrievalProfile> {
+pub fn merge_profiles(primary: &TaskClass, secondary: Option<&TaskClass>) -> Vec<RetrievalProfile> {
     let mut profiles = profiles_for_class(primary);
 
     if let Some(sec) = secondary {
@@ -262,8 +259,10 @@ pub enum CandidatePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactCandidate {
     pub subject_id: Uuid,
+    pub subject_name: String,
     pub predicate: String,
     pub object_id: Uuid,
+    pub object_name: String,
     pub evidence_status: String,
     pub source_episodes: Vec<Uuid>,
     pub namespace: String,
@@ -394,11 +393,8 @@ pub async fn execute_fact_lookup(
         .map(|row| {
             // Boost score when entity names match query terms.
             let base_score = row.similarity;
-            let name_boost = compute_entity_name_boost(
-                &row.subject_name,
-                &row.object_name,
-                query_terms,
-            );
+            let name_boost =
+                compute_entity_name_boost(&row.subject_name, &row.object_name, query_terms);
             let score = (base_score + name_boost).min(1.0);
 
             let provenance_mode = row
@@ -413,8 +409,10 @@ pub async fn execute_fact_lookup(
                 memory_type: MemoryType::Semantic,
                 payload: CandidatePayload::Fact(FactCandidate {
                     subject_id: row.subject_id,
+                    subject_name: row.subject_name,
                     predicate: row.predicate,
                     object_id: row.object_id,
+                    object_name: row.object_name,
                     evidence_status: row.evidence_status,
                     source_episodes: row.source_episodes,
                     namespace: row.namespace,
@@ -430,11 +428,7 @@ pub async fn execute_fact_lookup(
 /// Compute a boost factor when entity names match query terms.
 ///
 /// Returns a value in `[0.0, 0.1]` — up to 0.05 per matching entity name.
-fn compute_entity_name_boost(
-    subject_name: &str,
-    object_name: &str,
-    query_terms: &[String],
-) -> f64 {
+fn compute_entity_name_boost(subject_name: &str, object_name: &str, query_terms: &[String]) -> f64 {
     let mut boost: f64 = 0.0;
     let subject_lower = subject_name.to_lowercase();
     let object_lower = object_name.to_lowercase();
@@ -546,10 +540,7 @@ pub async fn execute_episode_recall(
 ///
 /// Recent episodes score close to 1.0; episodes older than
 /// [`RECENCY_HALF_LIFE_DAYS`] score below 0.5.
-fn compute_recency_weight(
-    occurred_at: chrono::DateTime<Utc>,
-    now: chrono::DateTime<Utc>,
-) -> f64 {
+fn compute_recency_weight(occurred_at: chrono::DateTime<Utc>, now: chrono::DateTime<Utc>) -> f64 {
     let age_days = (now - occurred_at).num_hours().max(0) as f64 / 24.0;
     let decay = (-age_days * (2.0_f64.ln()) / RECENCY_HALF_LIFE_DAYS).exp();
     decay.clamp(0.0, 1.0)
@@ -592,7 +583,10 @@ pub async fn execute_graph_neighborhood(
     let entity_ids = find_entities_by_query_terms(pool, namespace, query_terms).await?;
 
     if entity_ids.is_empty() {
-        tracing::debug!(namespace, "graph_neighborhood: no entities matched query terms");
+        tracing::debug!(
+            namespace,
+            "graph_neighborhood: no entities matched query terms"
+        );
         return Ok(Vec::new());
     }
 
@@ -601,8 +595,7 @@ pub async fn execute_graph_neighborhood(
 
     for entity_id in &entity_ids {
         // Start with 1-hop.
-        let results =
-            crate::db::traverse::traverse(pool, *entity_id, 1, namespace).await?;
+        let results = crate::db::traverse::traverse(pool, *entity_id, 1, namespace).await?;
 
         if results.len() < GRAPH_MIN_RESULTS {
             // Retry with 2-hop if too few results.
@@ -852,7 +845,8 @@ pub async fn execute_profiles(
                 let res = tokio::time::timeout(
                     PROFILE_TIMEOUT,
                     execute_fact_lookup(pool, query_embedding, namespace, query_terms),
-                ).await;
+                )
+                .await;
                 let res = match res {
                     Ok(inner) => inner,
                     Err(_) => {
@@ -875,7 +869,8 @@ pub async fn execute_profiles(
                 let res = tokio::time::timeout(
                     PROFILE_TIMEOUT,
                     execute_episode_recall(pool, query_embedding, namespace),
-                ).await;
+                )
+                .await;
                 let res = match res {
                     Ok(inner) => inner,
                     Err(_) => {
@@ -898,7 +893,8 @@ pub async fn execute_profiles(
                 let res = tokio::time::timeout(
                     PROFILE_TIMEOUT,
                     execute_graph_neighborhood(pool, namespace, query_terms),
-                ).await;
+                )
+                .await;
                 let res = match res {
                     Ok(inner) => inner,
                     Err(_) => {
@@ -907,7 +903,9 @@ pub async fn execute_profiles(
                             timeout_secs = PROFILE_TIMEOUT.as_secs(),
                             "profile execution timed out, continuing with other profiles"
                         );
-                        Err(RetrievalError::Timeout("graph_neighborhood timed out".into()))
+                        Err(RetrievalError::Timeout(
+                            "graph_neighborhood timed out".into(),
+                        ))
                     }
                 };
                 Some((res, t.elapsed()))
@@ -921,7 +919,8 @@ pub async fn execute_profiles(
                 let res = tokio::time::timeout(
                     PROFILE_TIMEOUT,
                     execute_procedure_assist(pool, namespace, task_class),
-                ).await;
+                )
+                .await;
                 let res = match res {
                     Ok(inner) => inner,
                     Err(_) => {
@@ -990,14 +989,21 @@ pub async fn execute_profiles(
     let mut seen_ids: HashSet<Uuid> = HashSet::new();
     let mut deduped: Vec<RetrievalCandidate> = Vec::with_capacity(all_candidates.len());
     // Sort by score descending so the first occurrence of each ID is the best.
-    all_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    all_candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     for candidate in all_candidates {
         if seen_ids.insert(candidate.id) {
             deduped.push(candidate);
         }
     }
 
-    let executed_names = executions.iter().map(|e| e.profile.to_string()).collect::<Vec<_>>();
+    let executed_names = executions
+        .iter()
+        .map(|e| e.profile.to_string())
+        .collect::<Vec<_>>();
 
     tracing::info!(
         total_candidates = deduped.len(),
@@ -1249,7 +1255,10 @@ mod tests {
     #[test]
     fn retrieval_profile_display() {
         assert_eq!(RetrievalProfile::FactLookup.to_string(), "fact_lookup");
-        assert_eq!(RetrievalProfile::EpisodeRecall.to_string(), "episode_recall");
+        assert_eq!(
+            RetrievalProfile::EpisodeRecall.to_string(),
+            "episode_recall"
+        );
         assert_eq!(
             RetrievalProfile::GraphNeighborhood.to_string(),
             "graph_neighborhood"
@@ -1268,8 +1277,7 @@ mod tests {
         let json = serde_json::to_string(&profile).expect("serialize");
         assert_eq!(json, "\"graph_neighborhood\"");
 
-        let deserialized: RetrievalProfile =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: RetrievalProfile = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, profile);
     }
 
@@ -1284,8 +1292,7 @@ mod tests {
 
         for profile in profiles {
             let json = serde_json::to_string(&profile).expect("serialize");
-            let back: RetrievalProfile =
-                serde_json::from_str(&json).expect("deserialize");
+            let back: RetrievalProfile = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(back, profile);
         }
     }
@@ -1340,10 +1347,7 @@ mod tests {
         let half_life_ago = now - chrono::Duration::days(RECENCY_HALF_LIFE_DAYS as i64);
         let weight = compute_recency_weight(half_life_ago, now);
         // Should be approximately 0.5.
-        assert!(
-            (weight - 0.5).abs() < 0.05,
-            "expected ~0.5, got {weight}"
-        );
+        assert!((weight - 0.5).abs() < 0.05, "expected ~0.5, got {weight}");
     }
 
     #[test]
@@ -1375,8 +1379,10 @@ mod tests {
             memory_type: MemoryType::Semantic,
             payload: CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "Rust".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "PostgreSQL".to_string(),
                 evidence_status: "extracted".to_string(),
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
@@ -1385,8 +1391,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
-        let back: RetrievalCandidate =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: RetrievalCandidate = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.id, candidate.id);
         assert!((back.score - candidate.score).abs() < f64::EPSILON);
         assert_eq!(back.source_profile, candidate.source_profile);
@@ -1410,8 +1415,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
-        let back: RetrievalCandidate =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: RetrievalCandidate = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.source_profile, RetrievalProfile::EpisodeRecall);
         assert_eq!(back.memory_type, MemoryType::Episodic);
     }
@@ -1435,8 +1439,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
-        let back: RetrievalCandidate =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: RetrievalCandidate = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.source_profile, RetrievalProfile::GraphNeighborhood);
     }
 
@@ -1457,8 +1460,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&candidate).expect("serialize");
-        let back: RetrievalCandidate =
-            serde_json::from_str(&json).expect("deserialize");
+        let back: RetrievalCandidate = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.source_profile, RetrievalProfile::ProcedureAssist);
         assert_eq!(back.memory_type, MemoryType::Procedural);
     }
@@ -1572,10 +1574,7 @@ mod tests {
         // Architecture: [FactLookup, GraphNeighborhood]
         // Compliance: [EpisodeRecall, FactLookup]
         // FactLookup appears in both — should appear only once.
-        let profiles = merge_profiles(
-            &TaskClass::Architecture,
-            Some(&TaskClass::Compliance),
-        );
+        let profiles = merge_profiles(&TaskClass::Architecture, Some(&TaskClass::Compliance));
 
         let fact_lookup_count = profiles
             .iter()

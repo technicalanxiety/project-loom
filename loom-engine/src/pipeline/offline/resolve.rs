@@ -10,10 +10,10 @@
 
 use sqlx::PgPool;
 
+use crate::config::LlmConfig;
 use crate::db::entities::{self, EntityError, EntityWithScore, NewEntity};
 use crate::llm::client::LlmClient;
 use crate::llm::embeddings::{self, EmbeddingError};
-use crate::config::LlmConfig;
 use crate::types::entity::{ExtractedEntity, ResolutionResult};
 
 /// Similarity threshold for semantic resolution (deliberately high to
@@ -541,7 +541,13 @@ pub async fn resolve_entity(
             "entity resolved via exact match"
         );
         update_serving_state_and_link(
-            pool, client, config, result.entity_id, name, episode_content, episode_id,
+            pool,
+            client,
+            config,
+            result.entity_id,
+            name,
+            episode_content,
+            episode_id,
         )
         .await?;
         return Ok(result);
@@ -559,16 +565,29 @@ pub async fn resolve_entity(
             "entity resolved via alias match"
         );
         update_serving_state_and_link(
-            pool, client, config, result.entity_id, name, episode_content, episode_id,
+            pool,
+            client,
+            config,
+            result.entity_id,
+            name,
+            episode_content,
+            episode_id,
         )
         .await?;
         return Ok(result);
     }
 
     // -- Pass 3: Semantic match ---------------------------------------------
-    let semantic = match
-        pass3_semantic_match(pool, client, config, name, episode_content, entity_type, namespace)
-            .await
+    let semantic = match pass3_semantic_match(
+        pool,
+        client,
+        config,
+        name,
+        episode_content,
+        entity_type,
+        namespace,
+    )
+    .await
     {
         Ok(result) => result,
         Err(e) => {
@@ -584,9 +603,9 @@ pub async fn resolve_entity(
             );
 
             // Log a conflict record so the dashboard surfaces this for review.
-            if let Err(conflict_err) = log_resolution_conflict(
-                pool, name, entity_type, namespace, &[],
-            ).await {
+            if let Err(conflict_err) =
+                log_resolution_conflict(pool, name, entity_type, namespace, &[]).await
+            {
                 tracing::error!(
                     entity_name = %name,
                     error = %conflict_err,
@@ -652,7 +671,13 @@ pub async fn resolve_entity(
 
     // -- Post-resolution: update serving state and link episode --------------
     update_serving_state_and_link(
-        pool, client, config, result.entity_id, name, episode_content, episode_id,
+        pool,
+        client,
+        config,
+        result.entity_id,
+        name,
+        episode_content,
+        episode_id,
     )
     .await?;
 
@@ -777,24 +802,32 @@ mod tests {
             actual: 512,
         });
         let msg = err.to_string();
-        assert!(
-            msg.contains("embedding generation failed"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("embedding generation failed"), "got: {msg}");
     }
 
     #[test]
     fn resolve_error_type_constraint_displays_message() {
         let err = ResolveError::TypeConstraint("invalid entity type 'foo'".into());
         let msg = err.to_string();
-        assert!(msg.contains("entity type constraint violation"), "got: {msg}");
+        assert!(
+            msg.contains("entity type constraint violation"),
+            "got: {msg}"
+        );
     }
 
     #[test]
     fn validate_entity_type_accepts_all_valid_types() {
         let valid = [
-            "person", "organization", "project", "service", "technology",
-            "pattern", "environment", "document", "metric", "decision",
+            "person",
+            "organization",
+            "project",
+            "service",
+            "technology",
+            "pattern",
+            "environment",
+            "document",
+            "metric",
+            "decision",
         ];
         for t in &valid {
             assert!(validate_entity_type(t).is_ok(), "should accept '{t}'");
@@ -1218,10 +1251,7 @@ mod tests {
     fn resolution_pass3_gap_at_threshold_merges() {
         // Gap slightly above 0.03 should merge (>= 0.03).
         // Use values where the gap is unambiguously >= 0.03 in f64.
-        let candidates = vec![
-            make_candidate("Top", 0.96),
-            make_candidate("Second", 0.925),
-        ];
+        let candidates = vec![make_candidate("Top", 0.96), make_candidate("Second", 0.925)];
         let result = evaluate_semantic_candidates(&candidates);
         assert!(matches!(result, SemanticResult::Merge(_)));
     }
@@ -1229,10 +1259,7 @@ mod tests {
     #[test]
     fn resolution_pass3_gap_just_below_003_conflicts() {
         // Gap of 0.029 (< 0.03) should conflict.
-        let candidates = vec![
-            make_candidate("Top", 0.96),
-            make_candidate("Second", 0.931),
-        ];
+        let candidates = vec![make_candidate("Top", 0.96), make_candidate("Second", 0.931)];
         let result = evaluate_semantic_candidates(&candidates);
         assert!(matches!(result, SemanticResult::Conflict { .. }));
     }
@@ -1293,7 +1320,10 @@ mod tests {
             .iter()
             .any(|a| a.to_lowercase() == lowercase_name);
 
-        assert!(!already_present, "Kubernetes should not match existing aliases");
+        assert!(
+            !already_present,
+            "Kubernetes should not match existing aliases"
+        );
     }
 
     #[test]

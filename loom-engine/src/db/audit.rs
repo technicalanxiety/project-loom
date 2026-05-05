@@ -168,16 +168,11 @@ pub async fn query_audit_logs(
 /// Fetch a single audit log entry by its UUID.
 ///
 /// Returns `None` if no entry with the given id exists.
-pub async fn get_audit_entry(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<Option<AuditLogEntry>, AuditError> {
-    let row = sqlx::query_as::<_, AuditLogEntry>(
-        "SELECT * FROM loom_audit_log WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_audit_entry(pool: &PgPool, id: Uuid) -> Result<Option<AuditLogEntry>, AuditError> {
+    let row = sqlx::query_as::<_, AuditLogEntry>("SELECT * FROM loom_audit_log WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(row)
 }

@@ -112,7 +112,11 @@ pub async fn extract_entities(
 ) -> Result<EntityExtractionResult, ExtractionError> {
     let model = &config.extraction_model;
 
-    tracing::info!(model, content_len = episode_content.len(), "starting entity extraction");
+    tracing::info!(
+        model,
+        content_len = episode_content.len(),
+        "starting entity extraction"
+    );
 
     let mut schema = serde_json::to_value(schema_for!(ExtractionResponse))
         .map_err(|e| ExtractionError::Deserialization(format!("entity schema build: {e}")))?;
@@ -290,9 +294,8 @@ fn deserialize_response<T: serde::de::DeserializeOwned>(
         let trimmed = text.trim();
         // Strip markdown code fences if the LLM wrapped the response.
         let json_text = strip_code_fences(trimmed);
-        return serde_json::from_str::<T>(json_text).map_err(|e| {
-            ExtractionError::Deserialization(format!("{context}: {e}"))
-        });
+        return serde_json::from_str::<T>(json_text)
+            .map_err(|e| ExtractionError::Deserialization(format!("{context}: {e}")));
     }
 
     Err(ExtractionError::Deserialization(format!(
@@ -333,10 +336,8 @@ fn sanitize_schema_for_ollama(value: &mut serde_json::Value) {
 
             // Flatten `"type": ["X", "null"]` → `"type": "X"`.
             if let Some(serde_json::Value::Array(arr)) = map.get("type") {
-                let non_null: Vec<&serde_json::Value> = arr
-                    .iter()
-                    .filter(|v| v.as_str() != Some("null"))
-                    .collect();
+                let non_null: Vec<&serde_json::Value> =
+                    arr.iter().filter(|v| v.as_str() != Some("null")).collect();
                 if non_null.len() == 1 {
                     let single = non_null[0].clone();
                     map.insert("type".into(), single);
@@ -348,9 +349,7 @@ fn sanitize_schema_for_ollama(value: &mut serde_json::Value) {
             if let Some(serde_json::Value::Array(variants)) = map.get("anyOf") {
                 let non_null: Vec<serde_json::Value> = variants
                     .iter()
-                    .filter(|v| {
-                        v.get("type").and_then(|t| t.as_str()) != Some("null")
-                    })
+                    .filter(|v| v.get("type").and_then(|t| t.as_str()) != Some("null"))
                     .cloned()
                     .collect();
                 if non_null.len() == 1 {
@@ -533,7 +532,8 @@ mod tests {
 
     #[test]
     fn deserialize_entity_response_from_fenced_string() {
-        let json_text = "```json\n{\"entities\": [{\"name\": \"Axum\", \"entity_type\": \"technology\"}]}\n```";
+        let json_text =
+            "```json\n{\"entities\": [{\"name\": \"Axum\", \"entity_type\": \"technology\"}]}\n```";
         let value = serde_json::Value::String(json_text.to_string());
 
         let result: ExtractionResponse =
@@ -725,8 +725,7 @@ mod tests {
             azure_openai_url: None,
             azure_openai_key: None,
         };
-        let client =
-            crate::llm::client::LlmClient::new(&config).expect("should build client");
+        let client = crate::llm::client::LlmClient::new(&config).expect("should build client");
         (client, config)
     }
 

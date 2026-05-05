@@ -93,7 +93,6 @@ fn compute_content_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-
 // ---------------------------------------------------------------------------
 // POST /api/learn
 // ---------------------------------------------------------------------------
@@ -122,7 +121,7 @@ fn compute_content_hash(content: &str) -> String {
 ///
 /// 1. Content-hash + namespace check — catches identical content re-submitted
 ///    under different event IDs.
-/// 2. `(source, source_event_id)` unique constraint handled by
+/// 2. `(namespace, source, source_event_id)` unique constraint handled by
 ///    [`episodes::insert_episode`].
 ///
 /// Returns [`LearnResponse`] with the episode UUID and status `"queued"` or
@@ -133,13 +132,17 @@ pub async fn handle_api_learn(
 ) -> Result<Json<LearnResponse>, RestError> {
     // Validate required fields.
     if req.content.trim().is_empty() {
-        return Err(RestError::InvalidRequest("content must not be empty".into()));
+        return Err(RestError::InvalidRequest(
+            "content must not be empty".into(),
+        ));
     }
     if req.source.trim().is_empty() {
         return Err(RestError::InvalidRequest("source must not be empty".into()));
     }
     if req.namespace.trim().is_empty() {
-        return Err(RestError::InvalidRequest("namespace must not be empty".into()));
+        return Err(RestError::InvalidRequest(
+            "namespace must not be empty".into(),
+        ));
     }
 
     // REST callers must supply ingestion_mode explicitly. MCP is the only
@@ -187,7 +190,7 @@ pub async fn handle_api_learn(
         }));
     }
 
-    // Insert episode — insert_episode handles (source, source_event_id) dedup.
+    // Insert episode — insert_episode handles namespace-scoped source_event_id dedup.
     let new_ep = NewEpisode {
         source: req.source.clone(),
         source_id: None,
@@ -306,7 +309,7 @@ fn build_source_event_id(event_type: &str, comment_id: i64) -> String {
 /// # Idempotency
 ///
 /// 1. Content-hash + namespace check — catches identical content.
-/// 2. `(source, source_event_id)` unique constraint via
+/// 2. `(namespace, source, source_event_id)` unique constraint via
 ///    [`episodes::insert_episode`] using `github:{event_type}:{comment_id}`.
 ///
 /// Returns [`LearnResponse`] with the episode UUID and status.
@@ -319,14 +322,10 @@ pub async fn handle_github_webhook(
     let event_type = headers
         .get("X-GitHub-Event")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| {
-            RestError::InvalidRequest("missing X-GitHub-Event header".into())
-        })?;
+        .ok_or_else(|| RestError::InvalidRequest("missing X-GitHub-Event header".into()))?;
 
     // Only accept supported event types.
-    if event_type != GITHUB_EVENT_ISSUE_COMMENT
-        && event_type != GITHUB_EVENT_PR_REVIEW_COMMENT
-    {
+    if event_type != GITHUB_EVENT_ISSUE_COMMENT && event_type != GITHUB_EVENT_PR_REVIEW_COMMENT {
         return Err(RestError::InvalidRequest(format!(
             "unsupported GitHub event type: {event_type}; \
              expected 'issue_comment' or 'pull_request_review_comment'"
@@ -378,7 +377,7 @@ pub async fn handle_github_webhook(
         }));
     }
 
-    // Insert episode — insert_episode handles (source, source_event_id) dedup.
+    // Insert episode — insert_episode handles namespace-scoped source_event_id dedup.
     // GitHub webhooks are verbatim real-time capture of external events,
     // which matches the live-capture semantic even though no MCP client is
     // involved. The taxonomy has three slots and "vendor import" (historical
@@ -688,7 +687,10 @@ mod tests {
     fn whitespace_namespace_triggers_invalid_request() {
         let namespace = "  \t  ";
         let is_empty = namespace.trim().is_empty();
-        assert!(is_empty, "whitespace-only namespace must be treated as empty");
+        assert!(
+            is_empty,
+            "whitespace-only namespace must be treated as empty"
+        );
     }
 
     #[test]
@@ -751,32 +753,64 @@ mod tests {
 
     #[test]
     fn health_response_both_ok_produces_ok_status() {
-        let db = ComponentStatus { ok: true, latency_ms: Some(1), error: None };
-        let ollama = ComponentStatus { ok: true, latency_ms: Some(2), error: None };
+        let db = ComponentStatus {
+            ok: true,
+            latency_ms: Some(1),
+            error: None,
+        };
+        let ollama = ComponentStatus {
+            ok: true,
+            latency_ms: Some(2),
+            error: None,
+        };
         let overall = if db.ok && ollama.ok { "ok" } else { "degraded" };
         assert_eq!(overall, "ok");
     }
 
     #[test]
     fn health_response_db_fail_produces_degraded_status() {
-        let db = ComponentStatus { ok: false, latency_ms: None, error: Some("down".into()) };
-        let ollama = ComponentStatus { ok: true, latency_ms: Some(2), error: None };
+        let db = ComponentStatus {
+            ok: false,
+            latency_ms: None,
+            error: Some("down".into()),
+        };
+        let ollama = ComponentStatus {
+            ok: true,
+            latency_ms: Some(2),
+            error: None,
+        };
         let overall = if db.ok && ollama.ok { "ok" } else { "degraded" };
         assert_eq!(overall, "degraded");
     }
 
     #[test]
     fn health_response_ollama_fail_produces_degraded_status() {
-        let db = ComponentStatus { ok: true, latency_ms: Some(1), error: None };
-        let ollama = ComponentStatus { ok: false, latency_ms: None, error: Some("unreachable".into()) };
+        let db = ComponentStatus {
+            ok: true,
+            latency_ms: Some(1),
+            error: None,
+        };
+        let ollama = ComponentStatus {
+            ok: false,
+            latency_ms: None,
+            error: Some("unreachable".into()),
+        };
         let overall = if db.ok && ollama.ok { "ok" } else { "degraded" };
         assert_eq!(overall, "degraded");
     }
 
     #[test]
     fn health_response_both_fail_produces_degraded_status() {
-        let db = ComponentStatus { ok: false, latency_ms: None, error: Some("down".into()) };
-        let ollama = ComponentStatus { ok: false, latency_ms: None, error: Some("unreachable".into()) };
+        let db = ComponentStatus {
+            ok: false,
+            latency_ms: None,
+            error: Some("down".into()),
+        };
+        let ollama = ComponentStatus {
+            ok: false,
+            latency_ms: None,
+            error: Some("unreachable".into()),
+        };
         let overall = if db.ok && ollama.ok { "ok" } else { "degraded" };
         assert_eq!(overall, "degraded");
     }
@@ -788,8 +822,16 @@ mod tests {
         for status in &valid_statuses {
             let resp = HealthResponse {
                 status: status.to_string(),
-                database: ComponentStatus { ok: true, latency_ms: None, error: None },
-                ollama: ComponentStatus { ok: true, latency_ms: None, error: None },
+                database: ComponentStatus {
+                    ok: true,
+                    latency_ms: None,
+                    error: None,
+                },
+                ollama: ComponentStatus {
+                    ok: true,
+                    latency_ms: None,
+                    error: None,
+                },
                 version: "0.1.0".to_string(),
             };
             assert!(
@@ -804,15 +846,29 @@ mod tests {
     fn health_response_contains_database_and_ollama_fields() {
         let resp = HealthResponse {
             status: "ok".to_string(),
-            database: ComponentStatus { ok: true, latency_ms: Some(5), error: None },
-            ollama: ComponentStatus { ok: true, latency_ms: Some(10), error: None },
+            database: ComponentStatus {
+                ok: true,
+                latency_ms: Some(5),
+                error: None,
+            },
+            ollama: ComponentStatus {
+                ok: true,
+                latency_ms: Some(10),
+                error: None,
+            },
             version: "0.1.0".to_string(),
         };
         let json = serde_json::to_value(&resp).unwrap();
-        assert!(json.get("database").is_some(), "database field must be present");
+        assert!(
+            json.get("database").is_some(),
+            "database field must be present"
+        );
         assert!(json.get("ollama").is_some(), "ollama field must be present");
         assert!(json.get("status").is_some(), "status field must be present");
-        assert!(json.get("version").is_some(), "version field must be present");
+        assert!(
+            json.get("version").is_some(),
+            "version field must be present"
+        );
     }
 
     // -- GitHub webhook payload deserialization -----------------------------
@@ -1006,8 +1062,8 @@ mod tests {
     fn unsupported_event_types_rejected() {
         let unsupported = ["push", "pull_request", "issues", "create", "delete", "star"];
         for event in &unsupported {
-            let is_supported = *event == GITHUB_EVENT_ISSUE_COMMENT
-                || *event == GITHUB_EVENT_PR_REVIEW_COMMENT;
+            let is_supported =
+                *event == GITHUB_EVENT_ISSUE_COMMENT || *event == GITHUB_EVENT_PR_REVIEW_COMMENT;
             assert!(
                 !is_supported,
                 "event type '{}' should not be supported",

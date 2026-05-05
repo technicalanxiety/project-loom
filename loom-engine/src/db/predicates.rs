@@ -26,11 +26,10 @@ pub enum PredicateError {
 ///
 /// Returns every row from `loom_predicate_packs` ordered by pack name.
 pub async fn get_all_packs(pool: &PgPool) -> Result<Vec<PredicatePack>, PredicateError> {
-    let rows = sqlx::query_as::<_, PredicatePack>(
-        "SELECT * FROM loom_predicate_packs ORDER BY pack",
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query_as::<_, PredicatePack>("SELECT * FROM loom_predicate_packs ORDER BY pack")
+            .fetch_all(pool)
+            .await?;
 
     Ok(rows)
 }
@@ -93,12 +92,11 @@ pub async fn find_canonical_predicate(
     pool: &PgPool,
     predicate: &str,
 ) -> Result<Option<PredicateEntry>, PredicateError> {
-    let row = sqlx::query_as::<_, PredicateEntry>(
-        "SELECT * FROM loom_predicates WHERE predicate = $1",
-    )
-    .bind(predicate)
-    .fetch_optional(pool)
-    .await?;
+    let row =
+        sqlx::query_as::<_, PredicateEntry>("SELECT * FROM loom_predicates WHERE predicate = $1")
+            .bind(predicate)
+            .fetch_optional(pool)
+            .await?;
 
     Ok(row)
 }
@@ -110,10 +108,7 @@ pub async fn find_canonical_predicate(
 /// Increment the usage_count by 1 on a canonical predicate.
 ///
 /// Called each time a fact is stored using this predicate.
-pub async fn increment_usage_count(
-    pool: &PgPool,
-    predicate: &str,
-) -> Result<(), PredicateError> {
+pub async fn increment_usage_count(pool: &PgPool, predicate: &str) -> Result<(), PredicateError> {
     sqlx::query(
         r#"
         UPDATE loom_predicates
@@ -257,9 +252,7 @@ pub async fn query_candidates_by_threshold(
 /// List all predicate candidates (resolved and unresolved).
 ///
 /// Used by the dashboard for the full candidate view.
-pub async fn list_all_candidates(
-    pool: &PgPool,
-) -> Result<Vec<PredicateCandidate>, PredicateError> {
+pub async fn list_all_candidates(pool: &PgPool) -> Result<Vec<PredicateCandidate>, PredicateError> {
     let rows = sqlx::query_as::<_, PredicateCandidate>(
         "SELECT * FROM loom_predicate_candidates ORDER BY created_at DESC",
     )

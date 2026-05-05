@@ -1,0 +1,190 @@
+# AGENTS.md — project context for Codex sessions
+
+This file is auto-loaded by Codex when working in this repo. It
+documents the invariants and conventions you need to respect when making
+changes.
+
+For **integration setup** (how to wire Loom to Codex, Codex
+Desktop, ChatGPT, GitHub Copilot, or M365 Copilot as an MCP memory
+server), see [docs/clients/](docs/clients/). Each client has its own
+guide.
+
+---
+
+## What Loom is
+
+Project Loom is a PostgreSQL-native memory compiler for AI workflows.
+It ingests episodes (verbatim interaction records), extracts entities
+and facts, and compiles context packages for AI queries. It runs as
+five Docker containers: loom-engine (Rust / axum / sqlx), loom-dashboard
+(React SPA), PostgreSQL 17 with pgvector, Ollama for local LLM
+inference, and Caddy as the reverse proxy.
+
+This is **personal infrastructure**, not a maintained product. No PRs
+reviewed, no issues answered. See [PROJECT-STANCE.md](PROJECT-STANCE.md).
+
+## Load-bearing invariants — do not break
+
+### Three-mode ingestion taxonomy
+
+Every episode carries exactly one `ingestion_mode`:
+
+| Mode | Path | Ranking coefficient |
+|------|------|---------------------|
+| `user_authored_seed` | `cli/loom-seed.py` posts user-authored markdown | 0.8 |
+| `vendor_import` | `bootstrap/*.py` parsers post vendor-export excerpts with `parser_version` + `parser_source_schema` | 0.6 |
+| `live_mcp_capture` | MCP `loom_learn` (server-hardcoded) or PostSession hook POST to `/api/learn` | 1.0 |
+
+No `llm_reconstruction` mode exists. See
+[ADR-004](docs/adr/004-ingestion-modes.md).
+
+### Verbatim content invariant
+
+Episode `content` must be verbatim — a transcript excerpt, a vendor
+export excerpt, or user-authored prose. **Never** LLM summaries,
+paraphrases, or reconstructions. The rule is not enforceable at runtime;
+it's enforced by shipped templates, discipline, and the ADR. See
+[ADR-005](docs/adr/005-verbatim-content-invariant.md). When editing
+any template, docs, or client guide, preserve the "do not summarize,
+paraphrase, or reconstruct" language — it's load-bearing.
+
+### Namespace isolation
+
+Memory in `namespace=a` is invisible to queries in `namespace=b`. No
+cross-namespace retrieval. Every episode, entity, fact, and procedure
+belongs to exactly one namespace.
+
+Idempotency keys are namespace-scoped too. `source_event_id` dedup is
+`(namespace, source, source_event_id)`, not global. Re-ingesting the
+same vendor export, seed file, or hook event into a second namespace must
+create/use the row in that namespace, never return a row from another
+namespace.
+
+### MCP server hardcodes `live_mcp_capture`
+
+The MCP handler ignores whatever `ingestion_mode` a client sends and
+sets it to `live_mcp_capture`. Clients cannot forge the mode through
+this transport. Do not add an override path.
+
+### Episode processing state machine
+
+Every episode carries a `processing_status` that moves through:
+`pending` → `processing` → (`completed` | `failed`). The legacy
+`processed BOOLEAN` column is kept in sync with `completed` for read-side
+compatibility but is no longer authoritative — new code must consult
+`processing_status`.
+
+The worker:
+1. Polls `pending` rows whose `processing_last_attempt` is NULL or older
+   than `EPISODE_BACKOFF_BASE_SECS * 2^processing_attempts` seconds.
+2. Atomically claims each row (pending → processing, increment attempts,
+   stamp `last_attempt = NOW()`) via a conditional UPDATE, so two
+   workers cannot both pick up the same episode.
+3. On success: status → `completed`, `last_error` cleared.
+4. On failure: if `processing_attempts >= EPISODE_MAX_ATTEMPTS` (default
+   5), status → `failed` and retries stop. Otherwise status → `pending`
+   and the backoff predicate excludes the row until its window elapses.
+
+Do not add states, short-circuit the backoff, or retry `failed` rows
+without going through `requeue_episode` (which resets the counter). The
+whole point is to bound external LLM load for deterministically-bad
+episodes — a poison pill (e.g. content too large for nomic-embed-text's
+context window) must eventually stop consuming cycles. See
+[ADR-007](docs/adr/007-episode-processing-retry-backoff.md).
+
+Processing retries must also be idempotent. Any database side effect that
+can happen before `mark_episode_processed` must tolerate re-entry after a
+later failure. In particular, exact fact/triple/provenance rows must not
+duplicate, retry-returned non-current facts must not re-run supersession,
+and episode links on entities/procedures must not inflate provenance or
+observation counts.
+
+## Coding conventions for this repo
+
+- **Rust**: stable, tokio + axum 0.8 + sqlx 0.8. The `ring` crypto
+  provider is installed at startup (see `src/crypto.rs`) — do not
+  pull in `aws-lc-sys`. Compile-time checked SQL via sqlx.
+- **Dashboard**: React 19 + Vite 8 + TypeScript 6 + vitest 4 + biome 2.
+- **No defensive coding beyond system boundaries.** Don't validate
+  internal invariants that the type system or DB constraints already
+  enforce. Validate user input at REST / MCP handlers and trust
+  downstream.
+- **No backwards-compat shims.** This is single-operator infrastructure;
+  change the call sites, don't add compatibility layers.
+- **Comments are the exception.** Only when the "why" is non-obvious —
+  a hidden constraint, a subtle invariant, a workaround for a specific
+  bug. No comments restating what the code does.
+
+## Testing
+
+```bash
+# Unit + property tests
+cd loom-engine && cargo nextest run
+
+# Integration tests (need the test DB running)
+docker compose -f docker-compose.test.yml up -d postgres-test
+cd loom-engine && DATABASE_URL_TEST=postgres://loom_test:loom_test@localhost:5433/loom_test \
+  cargo nextest run --profile integration
+
+# Dashboard
+cd loom-dashboard && npm test
+
+# Lint
+cd loom-engine && cargo clippy -- -D warnings && cargo fmt --check
+cd loom-dashboard && npx biome check src/
+```
+
+Integration tests hit a real PostgreSQL — do not mock the DB. We got
+burned once by mocked tests passing while a prod migration was broken.
+
+## Where the pieces live
+
+| Thing | Location |
+|-------|----------|
+| Engine source | `loom-engine/src/` |
+| DB migrations | `loom-engine/migrations/` (001–016+) |
+| Dashboard SPA | `loom-dashboard/src/` |
+| Per-client integration guides | `docs/clients/` |
+| Architecture Decision Records | `docs/adr/` |
+| Bootstrap parsers (vendor imports) | `bootstrap/` |
+| Client templates (configs, hooks, instructions) | `templates/` |
+| Seed CLI | `cli/loom-seed.py` |
+| Benchmark seed corpus | `loom-engine/seed/benchmark/` |
+| Specs | `.kiro/specs/loom-memory-compiler/` |
+
+## When in doubt
+
+- **Integrating a new client?** Read [docs/clients/README.md](docs/clients/README.md)
+  for the checklist. Every client needs a guide, a template, and
+  (ideally) a bootstrap parser.
+- **Touching ingestion?** Re-read [ADR-004](docs/adr/004-ingestion-modes.md)
+  and [ADR-005](docs/adr/005-verbatim-content-invariant.md) before
+  making changes.
+- **Touching retrieval?** The four-dimension ranker (relevance 0.40,
+  recency 0.25, stability 0.20, provenance 0.15) and the provenance
+  coefficient (live 1.0, seed 0.8, vendor 0.6) are tuned. Don't
+  retune without benchmark evidence.
+- **Touching the LLM client or extraction prompts?** Re-read
+  [ADR-009](docs/adr/009-extraction-model-for-igpu.md) (extraction
+  model tiers — `qwen2.5:14b` on iGPU/APU, `gemma4:26b` on discrete,
+  `gemma4:e4b` last resort) and [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)
+  (8K embedding char cap, schema-constrained extraction via
+  `response_format: json_schema`). The 300 s `REQUEST_TIMEOUT` is not
+  configurable — keeps the operating envelope honest.
+- **Touching the MCP wire protocol?** Re-read [ADR-008](docs/adr/008-mcp-wire-protocol.md).
+  The JSON-RPC dispatcher at `POST /mcp` and the per-tool REST
+  endpoints share handler code; the server hardcodes
+  `ingestion_mode = live_mcp_capture` at both entry points.
+- **Touching the dashboard's Runtime page or telemetry?** Re-read
+  [ADR-010](docs/adr/010-streaming-telemetry.md). The SSE stream at
+  `/dashboard/api/stream/telemetry` pushes a `TelemetrySnapshot` every
+  second from an in-process ring buffer — no time-series store.
+- **Touching the benchmark?** All three conditions (A/B/C) call the
+  chat LLM so the `precision` column is comparable across the row —
+  it measures fraction of expected entities mentioned in the answer.
+  B and C also record `details.retrieval_precision` (predicate-aware,
+  with hydrated entity names so warm-tier facts contribute). Run
+  `cli/loom-seed.py --namespace benchmark loom-engine/seed/benchmark/`
+  (or click "Seed benchmark data" on the dashboard) and let extraction
+  settle before reading the cards; an empty `benchmark` namespace
+  makes B/C indistinguishable from A.

@@ -2184,10 +2184,9 @@ pub async fn handle_cancel_benchmark(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<CancelBenchmarkResponse>, DashboardError> {
-    let cancelled =
-        crate::pipeline::benchmark::cancel_benchmark_run(&state.pools.online, id)
-            .await
-            .map_err(|e| DashboardError::Database(e.to_string()))?;
+    let cancelled = crate::pipeline::benchmark::cancel_benchmark_run(&state.pools.online, id)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
     if cancelled {
         tracing::info!(run_id = %id, "benchmark run cancelled");
     } else {
@@ -2426,10 +2425,7 @@ pub async fn handle_requeue_all_failed(
         .await
         .map_err(|e| DashboardError::Database(e.to_string()))?;
 
-    tracing::info!(
-        requeued,
-        "dashboard: bulk requeue of failed episodes"
-    );
+    tracing::info!(requeued, "dashboard: bulk requeue of failed episodes");
 
     Ok(Json(RequeueAllFailedResponse { requeued }))
 }
@@ -2500,11 +2496,7 @@ pub async fn handle_telemetry_stream(
                     queue_depth: s.queue_depth,
                     failed_episodes: s.failed_episodes,
                     sparkline_latency: s.sparkline_latency.iter().cloned().collect(),
-                    sparkline_ingestion_rate: s
-                        .sparkline_ingestion_rate
-                        .iter()
-                        .cloned()
-                        .collect(),
+                    sparkline_ingestion_rate: s.sparkline_ingestion_rate.iter().cloned().collect(),
                     sparkline_compilation_rate: s
                         .sparkline_compilation_rate
                         .iter()

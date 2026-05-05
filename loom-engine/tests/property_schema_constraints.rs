@@ -37,8 +37,7 @@ const VALID_ENTITY_TYPES: &[&str] = &[
 /// Uses `DATABASE_URL` env var if set, otherwise falls back to the default
 /// test database URL for docker-compose.test.yml.
 async fn setup_test_pool() -> PgPool {
-    let db_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DB_URL.to_string());
 
     let pool = PgPool::connect(&db_url)
         .await

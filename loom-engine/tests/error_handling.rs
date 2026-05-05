@@ -53,7 +53,10 @@ mod ingest_errors {
         let msg = err.to_string();
         assert!(msg.contains("content"), "missing content error in: {msg}");
         assert!(msg.contains("source"), "missing source error in: {msg}");
-        assert!(msg.contains("namespace"), "missing namespace error in: {msg}");
+        assert!(
+            msg.contains("namespace"),
+            "missing namespace error in: {msg}"
+        );
     }
 
     #[test]
@@ -129,8 +132,16 @@ mod resolve_errors {
     #[test]
     fn all_valid_entity_types_accepted() {
         let valid = [
-            "person", "organization", "project", "service", "technology",
-            "pattern", "environment", "document", "metric", "decision",
+            "person",
+            "organization",
+            "project",
+            "service",
+            "technology",
+            "pattern",
+            "environment",
+            "document",
+            "metric",
+            "decision",
         ];
         for t in &valid {
             assert!(validate_entity_type(t).is_ok(), "should accept '{t}'");
@@ -157,7 +168,7 @@ mod resolve_errors {
 
 mod retrieval_errors {
     use loom_engine::pipeline::online::retrieve::{
-        profiles_for_class, merge_profiles, RetrievalError, DEFAULT_RANKING_SCORE,
+        merge_profiles, profiles_for_class, RetrievalError, DEFAULT_RANKING_SCORE,
     };
     use loom_engine::types::classification::TaskClass;
 
@@ -165,7 +176,10 @@ mod retrieval_errors {
     fn classification_failure_defaults_to_chat() {
         // When classification fails, the system defaults to Chat.
         let profiles = profiles_for_class(&TaskClass::Chat);
-        assert!(!profiles.is_empty(), "Chat should have at least one profile");
+        assert!(
+            !profiles.is_empty(),
+            "Chat should have at least one profile"
+        );
     }
 
     #[test]
@@ -202,10 +216,7 @@ mod retrieval_errors {
 
     #[test]
     fn merge_profiles_caps_at_three() {
-        let profiles = merge_profiles(
-            &TaskClass::Debug,
-            Some(&TaskClass::Architecture),
-        );
+        let profiles = merge_profiles(&TaskClass::Debug, Some(&TaskClass::Architecture));
         assert!(profiles.len() <= 3, "should cap at 3 profiles");
     }
 }
@@ -255,7 +266,9 @@ mod llm_errors {
     #[test]
     fn no_fallback_error_displays_message() {
         let err = LlmError::NoFallback;
-        assert!(err.to_string().contains("Azure OpenAI fallback not configured"));
+        assert!(err
+            .to_string()
+            .contains("Azure OpenAI fallback not configured"));
     }
 
     #[test]
@@ -305,9 +318,7 @@ mod llm_retry {
         // First two calls return 500, third succeeds.
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(500).set_body_string("server error"),
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
             .up_to_n_times(2)
             .expect(2)
             .mount(&server)
@@ -340,9 +351,7 @@ mod llm_retry {
 
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(429).set_body_string("rate limited"),
-            )
+            .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
             .up_to_n_times(2)
             .expect(2)
             .mount(&server)
@@ -375,9 +384,7 @@ mod llm_retry {
 
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(400).set_body_string("bad request"),
-            )
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
             .expect(1)
             .mount(&server)
             .await;
@@ -389,7 +396,10 @@ mod llm_retry {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, loom_engine::llm::client::LlmError::ApiError { status: 400, .. }));
+        assert!(matches!(
+            err,
+            loom_engine::llm::client::LlmError::ApiError { status: 400, .. }
+        ));
     }
 
     #[tokio::test]
@@ -422,10 +432,7 @@ mod llm_retry {
             .await
             .expect("should fall back to Azure");
 
-        assert_eq!(
-            result.get("fallback").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        assert_eq!(result.get("fallback").and_then(|v| v.as_bool()), Some(true));
     }
 
     #[tokio::test]
@@ -445,7 +452,10 @@ mod llm_retry {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, loom_engine::llm::client::LlmError::NoFallback));
+        assert!(matches!(
+            err,
+            loom_engine::llm::client::LlmError::NoFallback
+        ));
     }
 }
 
@@ -505,8 +515,8 @@ mod fact_errors {
 // ---------------------------------------------------------------------------
 
 mod processor_errors {
-    use loom_engine::worker::processor::ProcessorError;
     use loom_engine::db::episodes::EpisodeError;
+    use loom_engine::worker::processor::ProcessorError;
 
     #[test]
     fn processor_error_database_displays() {

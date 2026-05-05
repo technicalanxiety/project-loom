@@ -1,4 +1,9 @@
-use axum::{extract::DefaultBodyLimit, middleware, routing::{get, post}, Router};
+use axum::{
+    extract::DefaultBodyLimit,
+    middleware,
+    routing::{get, post},
+    Router,
+};
 use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -309,10 +314,8 @@ async fn main() {
         cancel_token.clone(),
     ));
 
-    let _scheduler_handles = scheduler::start_scheduler(
-        state.pools.offline.clone(),
-        cancel_token.clone(),
-    );
+    let _scheduler_handles =
+        scheduler::start_scheduler(state.pools.offline.clone(), cancel_token.clone());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], state.config.loom_port));
     tracing::info!("loom-engine listening on {}", addr);

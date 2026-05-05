@@ -177,10 +177,7 @@ impl LlmClient {
         let body = build_chat_body(model, system_prompt, user_prompt, schema);
 
         let ollama_endpoint = format!("{}/v1/chat/completions", self.ollama_url);
-        match self
-            .post_with_retry(&ollama_endpoint, &body, None)
-            .await
-        {
+        match self.post_with_retry(&ollama_endpoint, &body, None).await {
             Ok(resp) => parse_chat_response(&resp),
             Err(e) if is_connection_error(&e) => {
                 tracing::warn!(
@@ -207,11 +204,7 @@ impl LlmClient {
     /// last-resort defence for content whose token density exceeds the
     /// 1 char/token worst-case estimate (e.g. 4-byte Unicode that the
     /// tokenizer decomposes into individual bytes). See ADR-011.
-    pub async fn call_embeddings(
-        &self,
-        model: &str,
-        input: &str,
-    ) -> Result<Vec<f32>, LlmError> {
+    pub async fn call_embeddings(&self, model: &str, input: &str) -> Result<Vec<f32>, LlmError> {
         match self.call_embeddings_inner(model, input).await {
             Err(ref e) if is_context_length_error(e) => {
                 let half_chars = input.chars().count() / 2;
@@ -232,11 +225,7 @@ impl LlmClient {
 
     /// Inner implementation for [`call_embeddings`] — a single attempt
     /// without the context-length retry wrapper.
-    async fn call_embeddings_inner(
-        &self,
-        model: &str,
-        input: &str,
-    ) -> Result<Vec<f32>, LlmError> {
+    async fn call_embeddings_inner(&self, model: &str, input: &str) -> Result<Vec<f32>, LlmError> {
         let body = json!({
             "model": model,
             "input": input,
@@ -244,10 +233,7 @@ impl LlmClient {
         });
 
         let ollama_endpoint = format!("{}/v1/embeddings", self.ollama_url);
-        match self
-            .post_with_retry(&ollama_endpoint, &body, None)
-            .await
-        {
+        match self.post_with_retry(&ollama_endpoint, &body, None).await {
             Ok(resp) => parse_embedding_response(&resp),
             Err(e) if is_connection_error(&e) => {
                 tracing::warn!(
@@ -279,19 +265,14 @@ impl LlmClient {
         let body = build_chat_body("gpt-4.1-mini", system_prompt, user_prompt, schema);
 
         let endpoint = format!("{url}/v1/chat/completions");
-        let resp = self
-            .post_with_retry_azure(&endpoint, &body, key)
-            .await?;
+        let resp = self.post_with_retry_azure(&endpoint, &body, key).await?;
         parse_chat_response(&resp)
     }
 
     /// Embedding generation via Azure OpenAI (fallback path).
     ///
     /// Uses extended retry logic for rate limits (429).
-    async fn call_embeddings_azure(
-        &self,
-        input: &str,
-    ) -> Result<Vec<f32>, LlmError> {
+    async fn call_embeddings_azure(&self, input: &str) -> Result<Vec<f32>, LlmError> {
         let (url, key) = self.azure_config()?;
 
         let body = json!({
@@ -300,9 +281,7 @@ impl LlmClient {
         });
 
         let endpoint = format!("{url}/v1/embeddings");
-        let resp = self
-            .post_with_retry_azure(&endpoint, &body, key)
-            .await?;
+        let resp = self.post_with_retry_azure(&endpoint, &body, key).await?;
         parse_embedding_response(&resp)
     }
 
@@ -331,7 +310,12 @@ impl LlmClient {
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
                 let delay = BACKOFF_BASE * 2u32.pow(attempt - 1);
-                tracing::info!(attempt, delay_ms = delay.as_millis() as u64, url, "retrying LLM request");
+                tracing::info!(
+                    attempt,
+                    delay_ms = delay.as_millis() as u64,
+                    url,
+                    "retrying LLM request"
+                );
                 tokio::time::sleep(delay).await;
             }
 
@@ -357,10 +341,7 @@ impl LlmClient {
                     }
 
                     // Retry on server errors (5xx) and rate limits (429).
-                    let body_text = resp
-                        .text()
-                        .await
-                        .unwrap_or_default();
+                    let body_text = resp.text().await.unwrap_or_default();
                     let body_preview = truncate(&body_text, 512);
 
                     if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
@@ -624,10 +605,11 @@ fn is_context_length_error(err: &LlmError) -> bool {
 
 /// Truncate a string to at most `max` characters.
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max])
+        let end = s.char_indices().nth(max).map_or(s.len(), |(idx, _)| idx);
+        format!("{}…", &s[..end])
     }
 }
 
@@ -761,6 +743,12 @@ mod tests {
         assert!(result.ends_with('…'));
     }
 
+    #[test]
+    fn truncate_multibyte_string_stays_on_char_boundary() {
+        let result = truncate("ééééé", 3);
+        assert_eq!(result, "ééé…");
+    }
+
     // -- LlmError Display ---------------------------------------------------
 
     #[test]
@@ -830,9 +818,7 @@ mod tests {
         // First two calls return 500, third succeeds.
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(500).set_body_string("server error"),
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_string("server error"))
             .up_to_n_times(2)
             .expect(2)
             .mount(&server)
@@ -877,9 +863,7 @@ mod tests {
         // All calls return 500.
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(500).set_body_string("always failing"),
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_string("always failing"))
             .expect(3)
             .mount(&server)
             .await;
@@ -912,9 +896,7 @@ mod tests {
         // 400 is not retryable — should fail on first attempt.
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(400).set_body_string("bad request"),
-            )
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
             .expect(1)
             .mount(&server)
             .await;
@@ -1009,10 +991,7 @@ mod tests {
             .await
             .expect("should fall back to Azure");
 
-        assert_eq!(
-            result.get("fallback").and_then(|v| v.as_bool()),
-            Some(true)
-        );
+        assert_eq!(result.get("fallback").and_then(|v| v.as_bool()), Some(true));
     }
 
     #[tokio::test]
@@ -1048,9 +1027,7 @@ mod tests {
         // First two calls return 429 (rate limit), third succeeds.
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(429).set_body_string("rate limited"),
-            )
+            .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
             .up_to_n_times(2)
             .expect(2)
             .mount(&server)
@@ -1095,9 +1072,7 @@ mod tests {
         // All calls return 429 — retries should be exhausted.
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
-            .respond_with(
-                ResponseTemplate::new(429).set_body_string("rate limited"),
-            )
+            .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
             .expect(3)
             .mount(&server)
             .await;

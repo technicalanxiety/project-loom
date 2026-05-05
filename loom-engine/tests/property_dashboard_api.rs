@@ -33,26 +33,102 @@ struct DashboardRoute {
 fn all_dashboard_routes() -> Vec<DashboardRoute> {
     vec![
         // Read-only GET endpoints (17 total)
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/health", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/namespaces", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/compilations", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/compilations/{id}", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities/{id}", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/entities/{id}/graph", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/facts", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/conflicts", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/candidates", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/packs", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/packs/{pack}", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/predicates/active/{namespace}", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/retrieval", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/extraction", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/classification", is_write: false },
-        DashboardRoute { method: HttpMethod::Get, path: "/dashboard/api/metrics/hot-tier", is_write: false },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/health",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/namespaces",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/compilations",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/compilations/{id}",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/entities",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/entities/{id}",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/entities/{id}/graph",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/facts",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/conflicts",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/predicates/candidates",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/predicates/packs",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/predicates/packs/{pack}",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/predicates/active/{namespace}",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/metrics/retrieval",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/metrics/extraction",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/metrics/classification",
+            is_write: false,
+        },
+        DashboardRoute {
+            method: HttpMethod::Get,
+            path: "/dashboard/api/metrics/hot-tier",
+            is_write: false,
+        },
         // Write POST endpoints (exactly 2)
-        DashboardRoute { method: HttpMethod::Post, path: "/dashboard/api/conflicts/{id}/resolve", is_write: true },
-        DashboardRoute { method: HttpMethod::Post, path: "/dashboard/api/predicates/candidates/{id}/resolve", is_write: true },
+        DashboardRoute {
+            method: HttpMethod::Post,
+            path: "/dashboard/api/conflicts/{id}/resolve",
+            is_write: true,
+        },
+        DashboardRoute {
+            method: HttpMethod::Post,
+            path: "/dashboard/api/predicates/candidates/{id}/resolve",
+            is_write: true,
+        },
     ]
 }
 
@@ -183,7 +259,10 @@ mod unit_tests {
     #[test]
     fn exactly_two_post_routes_exist() {
         let routes = all_dashboard_routes();
-        let post_routes: Vec<_> = routes.iter().filter(|r| r.method == HttpMethod::Post).collect();
+        let post_routes: Vec<_> = routes
+            .iter()
+            .filter(|r| r.method == HttpMethod::Post)
+            .collect();
         assert_eq!(
             post_routes.len(),
             2,
@@ -256,12 +335,10 @@ mod unit_tests {
     #[test]
     fn get_route_count_is_seventeen() {
         let routes = all_dashboard_routes();
-        let get_count = routes.iter().filter(|r| r.method == HttpMethod::Get).count();
-        assert_eq!(
-            get_count,
-            17,
-            "expected 17 GET routes, found {}",
-            get_count
-        );
+        let get_count = routes
+            .iter()
+            .filter(|r| r.method == HttpMethod::Get)
+            .count();
+        assert_eq!(get_count, 17, "expected 17 GET routes, found {}", get_count);
     }
 }

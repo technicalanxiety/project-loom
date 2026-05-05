@@ -258,9 +258,7 @@ async fn ten_concurrent_pipeline_executions() {
     let mut handles = Vec::new();
 
     for _ in 0..10 {
-        handles.push(tokio::spawn(async move {
-            run_pipeline_in_memory(20, 5)
-        }));
+        handles.push(tokio::spawn(async move { run_pipeline_in_memory(20, 5) }));
     }
 
     let mut durations = Vec::new();
@@ -273,10 +271,7 @@ async fn ten_concurrent_pipeline_executions() {
     let max = durations.last().copied().unwrap_or(Duration::ZERO);
     let p95 = percentile(&durations, 95.0);
 
-    println!(
-        "10 concurrent: max={:?}, p95={:?}",
-        max, p95
-    );
+    println!("10 concurrent: max={:?}, p95={:?}", max, p95);
 
     assert!(
         max < Duration::from_millis(500),
@@ -310,9 +305,7 @@ fn hundred_pipelines_per_minute() {
 /// Validate percentile calculation correctness.
 #[test]
 fn percentile_calculation_correctness() {
-    let durations: Vec<Duration> = (1..=100)
-        .map(|i| Duration::from_millis(i))
-        .collect();
+    let durations: Vec<Duration> = (1..=100).map(|i| Duration::from_millis(i)).collect();
 
     let p50 = percentile(&durations, 50.0);
     let p95 = percentile(&durations, 95.0);

@@ -72,10 +72,7 @@ pub struct EntityWithScore {
 /// If an entity with the same `(name, entity_type, namespace)` already exists,
 /// the existing row is returned instead of failing. This mirrors the
 /// idempotent insert pattern used for episodes.
-pub async fn insert_entity(
-    pool: &PgPool,
-    entity: &NewEntity,
-) -> Result<Entity, EntityError> {
+pub async fn insert_entity(pool: &PgPool, entity: &NewEntity) -> Result<Entity, EntityError> {
     // Check for existing entity by unique constraint columns.
     let existing = get_entity_by_name_type_namespace(
         pool,
@@ -114,16 +111,11 @@ pub async fn insert_entity(
 /// Fetch a single entity by its UUID.
 ///
 /// Returns `None` if no entity with the given id exists.
-pub async fn get_entity_by_id(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<Option<Entity>, EntityError> {
-    let row = sqlx::query_as::<_, Entity>(
-        "SELECT * FROM loom_entities WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_entity_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Entity>, EntityError> {
+    let row = sqlx::query_as::<_, Entity>("SELECT * FROM loom_entities WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(row)
 }
@@ -321,7 +313,8 @@ pub async fn update_entity_state(
 /// Append an episode UUID to the entity's source_episodes array.
 ///
 /// Uses `array_append` with `COALESCE` to handle the case where
-/// source_episodes is NULL.
+/// source_episodes is NULL. If a retry already linked the episode, leaves the
+/// array unchanged.
 pub async fn append_source_episode(
     pool: &PgPool,
     entity_id: Uuid,
@@ -330,10 +323,11 @@ pub async fn append_source_episode(
     let row = sqlx::query_as::<_, Entity>(
         r#"
         UPDATE loom_entities
-        SET source_episodes = array_append(
-            COALESCE(source_episodes, ARRAY[]::uuid[]),
-            $2
-        )
+        SET source_episodes = CASE
+            WHEN $2 = ANY(COALESCE(source_episodes, ARRAY[]::uuid[]))
+                THEN COALESCE(source_episodes, ARRAY[]::uuid[])
+            ELSE array_append(COALESCE(source_episodes, ARRAY[]::uuid[]), $2)
+        END
         WHERE id = $1
         RETURNING *
         "#,

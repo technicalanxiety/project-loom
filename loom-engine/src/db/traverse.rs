@@ -56,14 +56,12 @@ pub async fn traverse(
     max_hops: i32,
     namespace: &str,
 ) -> Result<Vec<TraversalResult>, TraverseError> {
-    let rows = sqlx::query_as::<_, TraversalResult>(
-        "SELECT * FROM loom_traverse($1, $2, $3)",
-    )
-    .bind(entity_id)
-    .bind(max_hops)
-    .bind(namespace)
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query_as::<_, TraversalResult>("SELECT * FROM loom_traverse($1, $2, $3)")
+        .bind(entity_id)
+        .bind(max_hops)
+        .bind(namespace)
+        .fetch_all(pool)
+        .await?;
 
     Ok(rows)
 }

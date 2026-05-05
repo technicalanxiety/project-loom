@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::episodes::{self, EpisodeError};
 use crate::db::entities::EntityError;
+use crate::db::episodes::{self, EpisodeError};
 use crate::db::facts as facts_db;
 use crate::db::facts::FactError;
 use crate::pipeline::offline::extract::FactOrchestrationResult;
@@ -161,11 +161,10 @@ pub async fn store_metrics_and_mark_processed(
     metrics: &ExtractionMetrics,
     extraction_model: &str,
 ) -> Result<(), StateError> {
-    let metrics_json = serde_json::to_value(metrics)
-        .unwrap_or_else(|e| {
-            tracing::error!(error = %e, "failed to serialize extraction metrics");
-            serde_json::json!({})
-        });
+    let metrics_json = serde_json::to_value(metrics).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to serialize extraction metrics");
+        serde_json::json!({})
+    });
 
     // Update extraction lineage fields and metrics.
     episodes::update_extraction_metrics(
@@ -202,14 +201,12 @@ pub async fn initialize_fact_serving_state(
 ) -> Result<(), StateError> {
     for &fact_id in fact_ids {
         facts_db::update_fact_state(
-            pool,
-            fact_id,
-            None,  // no embedding yet
-            0.5,   // default salience
+            pool, fact_id, None,   // no embedding yet
+            0.5,    // default salience
             "warm", // default tier
-            0,     // initial access count
-            None,  // no last_accessed
-            false, // not pinned
+            0,      // initial access count
+            None,   // no last_accessed
+            false,  // not pinned
         )
         .await?;
     }
@@ -382,10 +379,7 @@ pub fn procedure_eligible_for_hot_tier(
 ///
 /// An item qualifies when it has been accessed in 5+ compilations within
 /// the last 14 days.
-pub fn qualifies_for_promotion(
-    access_count: i32,
-    last_accessed: Option<DateTime<Utc>>,
-) -> bool {
+pub fn qualifies_for_promotion(access_count: i32, last_accessed: Option<DateTime<Utc>>) -> bool {
     if access_count < PROMOTION_ACCESS_THRESHOLD {
         return false;
     }
@@ -405,10 +399,7 @@ pub fn qualifies_for_promotion(
 /// # Errors
 ///
 /// Returns [`StateError::Entity`] if the database update fails.
-pub async fn promote_entity_pin(
-    pool: &PgPool,
-    entity_id: Uuid,
-) -> Result<(), StateError> {
+pub async fn promote_entity_pin(pool: &PgPool, entity_id: Uuid) -> Result<(), StateError> {
     sqlx::query(
         r#"
         UPDATE loom_entity_state
@@ -431,10 +422,7 @@ pub async fn promote_entity_pin(
 /// # Errors
 ///
 /// Returns [`StateError::Fact`] if the database update fails.
-pub async fn promote_fact_pin(
-    pool: &PgPool,
-    fact_id: Uuid,
-) -> Result<(), StateError> {
+pub async fn promote_fact_pin(pool: &PgPool, fact_id: Uuid) -> Result<(), StateError> {
     sqlx::query(
         r#"
         UPDATE loom_fact_state
@@ -523,10 +511,7 @@ pub async fn promote_eligible_facts(pool: &PgPool) -> Result<usize, StateError> 
 /// # Errors
 ///
 /// Returns [`StateError`] if the database update fails.
-pub async fn demote_entity_unpin(
-    pool: &PgPool,
-    entity_id: Uuid,
-) -> Result<(), StateError> {
+pub async fn demote_entity_unpin(pool: &PgPool, entity_id: Uuid) -> Result<(), StateError> {
     sqlx::query(
         r#"
         UPDATE loom_entity_state
@@ -549,10 +534,7 @@ pub async fn demote_entity_unpin(
 /// # Errors
 ///
 /// Returns [`StateError`] if the database update fails.
-pub async fn demote_fact_unpin(
-    pool: &PgPool,
-    fact_id: Uuid,
-) -> Result<(), StateError> {
+pub async fn demote_fact_unpin(pool: &PgPool, fact_id: Uuid) -> Result<(), StateError> {
     sqlx::query(
         r#"
         UPDATE loom_fact_state
@@ -661,10 +643,7 @@ struct LowestSalienceItem {
 /// lowest-salience unpinned item until the budget is satisfied.
 ///
 /// Returns the number of items demoted.
-pub async fn enforce_hot_tier_budget(
-    pool: &PgPool,
-    namespace: &str,
-) -> Result<usize, StateError> {
+pub async fn enforce_hot_tier_budget(pool: &PgPool, namespace: &str) -> Result<usize, StateError> {
     // Get the budget for this namespace.
     let budget = get_namespace_hot_tier_budget(pool, namespace).await?;
     let mut total_demoted: usize = 0;
@@ -753,12 +732,11 @@ pub async fn get_namespace_hot_tier_budget(
     pool: &PgPool,
     namespace: &str,
 ) -> Result<i32, StateError> {
-    let row: Option<(Option<i32>,)> = sqlx::query_as(
-        "SELECT hot_tier_budget FROM loom_namespace_config WHERE namespace = $1",
-    )
-    .bind(namespace)
-    .fetch_optional(pool)
-    .await?;
+    let row: Option<(Option<i32>,)> =
+        sqlx::query_as("SELECT hot_tier_budget FROM loom_namespace_config WHERE namespace = $1")
+            .bind(namespace)
+            .fetch_optional(pool)
+            .await?;
 
     Ok(row
         .and_then(|(budget,)| budget)
@@ -881,7 +859,11 @@ pub async fn archive_stale_facts(pool: &PgPool) -> Result<usize, StateError> {
     .rows_affected();
 
     if archived > 0 {
-        tracing::info!(count = archived, days = ARCHIVAL_STALE_DAYS, "stale facts archived");
+        tracing::info!(
+            count = archived,
+            days = ARCHIVAL_STALE_DAYS,
+            "stale facts archived"
+        );
     }
     Ok(archived as usize)
 }
@@ -894,10 +876,7 @@ pub async fn archive_stale_facts(pool: &PgPool) -> Result<usize, StateError> {
 ///
 /// Archived facts remain searchable but are excluded from automatic
 /// retrieval in the online pipeline.
-pub fn is_fact_archived(
-    superseded_by: Option<Uuid>,
-    last_accessed: Option<DateTime<Utc>>,
-) -> bool {
+pub fn is_fact_archived(superseded_by: Option<Uuid>, last_accessed: Option<DateTime<Utc>>) -> bool {
     // Superseded facts are always archived.
     if superseded_by.is_some() {
         return true;
@@ -938,14 +917,7 @@ mod tests {
 
     #[test]
     fn compute_metrics_empty_results() {
-        let metrics = compute_extraction_metrics(
-            &[],
-            0,
-            None,
-            &[],
-            100,
-            "test-model",
-        );
+        let metrics = compute_extraction_metrics(&[], 0, None, &[], 100, "test-model");
 
         assert_eq!(metrics.extracted, 0);
         assert_eq!(metrics.resolved_exact, 0);
@@ -992,14 +964,7 @@ mod tests {
             },
         ];
 
-        let metrics = compute_extraction_metrics(
-            &results,
-            1,
-            None,
-            &[],
-            250,
-            "gemma4:26b",
-        );
+        let metrics = compute_extraction_metrics(&results, 1, None, &[], 250, "gemma4:26b");
 
         assert_eq!(metrics.extracted, 5);
         assert_eq!(metrics.resolved_exact, 2);
@@ -1033,14 +998,8 @@ mod tests {
             None,
         ];
 
-        let metrics = compute_extraction_metrics(
-            &[],
-            0,
-            Some(&fact_result),
-            &evidence,
-            500,
-            "gemma4:26b",
-        );
+        let metrics =
+            compute_extraction_metrics(&[], 0, Some(&fact_result), &evidence, 500, "gemma4:26b");
 
         assert_eq!(metrics.facts_extracted, 5);
         assert_eq!(metrics.canonical_predicate, 3);
@@ -1052,22 +1011,13 @@ mod tests {
 
     #[test]
     fn compute_metrics_unknown_method_counted_as_new() {
-        let results = vec![
-            ResolutionResult {
-                entity_id: uuid::Uuid::new_v4(),
-                method: "unknown_method".to_string(),
-                confidence: 0.5,
-            },
-        ];
+        let results = vec![ResolutionResult {
+            entity_id: uuid::Uuid::new_v4(),
+            method: "unknown_method".to_string(),
+            confidence: 0.5,
+        }];
 
-        let metrics = compute_extraction_metrics(
-            &results,
-            0,
-            None,
-            &[],
-            50,
-            "test",
-        );
+        let metrics = compute_extraction_metrics(&results, 0, None, &[], 50, "test");
 
         assert_eq!(metrics.new, 1);
     }
@@ -1094,10 +1044,7 @@ mod tests {
     fn salience_clamped_to_one() {
         // Even with very high salience, result should not exceed 1.0.
         let after = compute_salience_on_access(1.0);
-        assert!(
-            after <= 1.0,
-            "salience should be clamped to 1.0: {after}"
-        );
+        assert!(after <= 1.0, "salience should be clamped to 1.0: {after}");
     }
 
     #[test]
@@ -1125,13 +1072,11 @@ mod tests {
     #[test]
     fn compute_metrics_serializes_to_json() {
         let metrics = compute_extraction_metrics(
-            &[
-                ResolutionResult {
-                    entity_id: uuid::Uuid::new_v4(),
-                    method: "exact".to_string(),
-                    confidence: 1.0,
-                },
-            ],
+            &[ResolutionResult {
+                entity_id: uuid::Uuid::new_v4(),
+                method: "exact".to_string(),
+                confidence: 1.0,
+            }],
             0,
             None,
             &[Some("explicit".to_string())],
@@ -1266,7 +1211,10 @@ mod tests {
 
     #[test]
     fn superseded_fact_is_archived() {
-        assert!(is_fact_archived(Some(uuid::Uuid::new_v4()), Some(chrono::Utc::now())));
+        assert!(is_fact_archived(
+            Some(uuid::Uuid::new_v4()),
+            Some(chrono::Utc::now())
+        ));
     }
 
     #[test]

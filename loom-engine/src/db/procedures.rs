@@ -169,19 +169,21 @@ pub async fn query_by_namespace(
 /// Record a new observation of an existing procedure.
 ///
 /// Increments `observation_count`, appends `episode_id` to `source_episodes`,
-/// and updates `last_observed` to the current time.
+/// and updates `last_observed` to the current time. Returns `false` when a
+/// retry has already recorded this episode.
 pub async fn update_observation(
     pool: &PgPool,
     procedure_id: Uuid,
     episode_id: Uuid,
-) -> Result<(), ProcedureError> {
-    sqlx::query(
+) -> Result<bool, ProcedureError> {
+    let result = sqlx::query(
         r#"
         UPDATE loom_procedures
         SET observation_count = observation_count + 1,
             source_episodes = array_append(source_episodes, $2),
             last_observed = now()
         WHERE id = $1
+          AND NOT ($2 = ANY(source_episodes))
         "#,
     )
     .bind(procedure_id)
@@ -189,7 +191,7 @@ pub async fn update_observation(
     .execute(pool)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 /// Update the confidence score on a procedure.
@@ -217,10 +219,7 @@ pub async fn update_confidence(
 ///
 /// Only promotes procedures that are currently in `extracted` status.
 /// Returns the number of rows affected (0 or 1).
-pub async fn promote_to_promoted(
-    pool: &PgPool,
-    procedure_id: Uuid,
-) -> Result<u64, ProcedureError> {
+pub async fn promote_to_promoted(pool: &PgPool, procedure_id: Uuid) -> Result<u64, ProcedureError> {
     let result = sqlx::query(
         r#"
         UPDATE loom_procedures
@@ -314,10 +313,7 @@ pub async fn get_procedure_by_id(
 /// The row remains in the database but is excluded from normal queries
 /// (all retrieval functions filter `WHERE deleted_at IS NULL`). Returns
 /// the updated `Procedure` row.
-pub async fn soft_delete_procedure(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<Procedure, ProcedureError> {
+pub async fn soft_delete_procedure(pool: &PgPool, id: Uuid) -> Result<Procedure, ProcedureError> {
     let row = sqlx::query_as::<_, Procedure>(
         r#"
         UPDATE loom_procedures

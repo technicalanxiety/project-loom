@@ -22,10 +22,8 @@ fn namespace_strategy() -> impl Strategy<Value = String> {
 
 /// Proptest strategy for generating a pair of distinct namespaces.
 fn distinct_namespaces() -> impl Strategy<Value = (String, String)> {
-    (namespace_strategy(), namespace_strategy()).prop_filter(
-        "namespaces must be distinct",
-        |(a, b)| a != b,
-    )
+    (namespace_strategy(), namespace_strategy())
+        .prop_filter("namespaces must be distinct", |(a, b)| a != b)
 }
 
 /// The 10 valid entity types.

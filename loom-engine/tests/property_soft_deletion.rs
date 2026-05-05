@@ -9,8 +9,8 @@
 //!
 //! **Validates: Requirements 27.1, 27.3**
 
-use proptest::prelude::*;
 use chrono::{DateTime, Utc};
+use proptest::prelude::*;
 use uuid::Uuid;
 
 /// Proptest strategy for generating namespace strings.
@@ -70,7 +70,10 @@ impl SoftDeletableRecord {
 ///
 /// This mirrors the `WHERE deleted_at IS NULL` clause present in all
 /// retrieval queries across episodes, entities, facts, and procedures.
-fn query_active_records<'a>(records: &'a [SoftDeletableRecord], namespace: &str) -> Vec<&'a SoftDeletableRecord> {
+fn query_active_records<'a>(
+    records: &'a [SoftDeletableRecord],
+    namespace: &str,
+) -> Vec<&'a SoftDeletableRecord> {
     records
         .iter()
         .filter(|r| r.namespace == namespace && r.deleted_at.is_none())
@@ -78,7 +81,10 @@ fn query_active_records<'a>(records: &'a [SoftDeletableRecord], namespace: &str)
 }
 
 /// Simulate an audit query that returns only soft-deleted records.
-fn query_deleted_records<'a>(records: &'a [SoftDeletableRecord], namespace: &str) -> Vec<&'a SoftDeletableRecord> {
+fn query_deleted_records<'a>(
+    records: &'a [SoftDeletableRecord],
+    namespace: &str,
+) -> Vec<&'a SoftDeletableRecord> {
     records
         .iter()
         .filter(|r| r.namespace == namespace && r.deleted_at.is_some())

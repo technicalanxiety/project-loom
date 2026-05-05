@@ -31,9 +31,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::api::mcp::{
-    handle_loom_learn, handle_loom_recall, handle_loom_think, AppState,
-};
+use crate::api::mcp::{handle_loom_learn, handle_loom_recall, handle_loom_think, AppState};
 use crate::types::mcp::{LearnRequest, RecallRequest, ThinkRequest};
 
 // ---------------------------------------------------------------------------
@@ -428,9 +426,8 @@ fn json_error(id: Value, code: i32, message: impl Into<String>) -> Response {
 }
 
 fn tool_ok<T: Serialize>(id: Value, payload: &T) -> Response {
-    let text = serde_json::to_string_pretty(payload).unwrap_or_else(|e| {
-        format!("{{\"error\": \"failed to serialize response: {e}\"}}")
-    });
+    let text = serde_json::to_string_pretty(payload)
+        .unwrap_or_else(|e| format!("{{\"error\": \"failed to serialize response: {e}\"}}"));
     json_ok(
         id,
         json!({
@@ -497,10 +494,7 @@ mod tests {
 
     #[test]
     fn negotiates_to_client_version_when_provided() {
-        assert_eq!(
-            negotiate_protocol_version(Some("2025-11-25")),
-            "2025-11-25"
-        );
+        assert_eq!(negotiate_protocol_version(Some("2025-11-25")), "2025-11-25");
     }
 
     #[test]
@@ -550,7 +544,10 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         for field in &["content", "source", "namespace"] {
-            assert!(required.contains(field), "loom_learn missing required: {field}");
+            assert!(
+                required.contains(field),
+                "loom_learn missing required: {field}"
+            );
         }
     }
 
@@ -606,7 +603,10 @@ mod tests {
             .find(|t| t["name"] == "loom_learn")
             .unwrap();
         let description = learn["description"].as_str().unwrap();
-        assert!(description.contains("verbatim"), "learn desc must say verbatim");
+        assert!(
+            description.contains("verbatim"),
+            "learn desc must say verbatim"
+        );
         assert!(
             description.to_lowercase().contains("never summar")
                 || description.to_lowercase().contains("never reconstruct")
@@ -629,9 +629,15 @@ mod tests {
     fn capabilities_advertise_tools_only() {
         let caps = server_capabilities();
         assert!(caps.get("tools").is_some(), "must advertise tools");
-        assert!(caps.get("resources").is_none(), "must not advertise resources");
+        assert!(
+            caps.get("resources").is_none(),
+            "must not advertise resources"
+        );
         assert!(caps.get("prompts").is_none(), "must not advertise prompts");
-        assert!(caps.get("sampling").is_none(), "must not advertise sampling");
+        assert!(
+            caps.get("sampling").is_none(),
+            "must not advertise sampling"
+        );
     }
 
     // -- JSON-RPC error code constants --------------------------------------

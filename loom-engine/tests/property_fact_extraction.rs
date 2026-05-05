@@ -17,9 +17,7 @@ use chrono::Utc;
 use proptest::prelude::*;
 use uuid::Uuid;
 
-use loom_engine::pipeline::offline::extract::{
-    format_predicate_block, CANDIDATE_REVIEW_THRESHOLD,
-};
+use loom_engine::pipeline::offline::extract::{format_predicate_block, CANDIDATE_REVIEW_THRESHOLD};
 use loom_engine::pipeline::offline::supersede::NewFactDetails;
 use loom_engine::types::fact::ExtractedFact;
 use loom_engine::types::predicate::PredicateEntry;
@@ -233,7 +231,6 @@ mod pack_aware_prompt_assembly {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Property 9: Canonical Predicate Classification
 // ---------------------------------------------------------------------------
@@ -325,7 +322,6 @@ mod canonical_predicate_classification {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Property 10: Custom Predicate Occurrence Tracking
@@ -475,7 +471,6 @@ mod custom_predicate_occurrence_tracking {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Property 12: Fact Supersession
@@ -680,7 +675,6 @@ mod fact_supersession {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Property 33: Predicate Pack Isolation

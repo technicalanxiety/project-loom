@@ -159,7 +159,7 @@ graph TB
 The online and offline pipelines share PostgreSQL but use **separate connection pools** so offline processing never starves query serving:
 
 - **Online pipeline** (loom_think): classify → retrieve → weight → rank → compile. Target < 500ms p95.
-- **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately. Each episode moves through a `pending → processing → completed | failed` state machine with exponential backoff on failure (see [ADR-007](docs/adr/007-episode-processing-retry-backoff.md)); permanently-unprocessable episodes surface on the dashboard for operator triage rather than retrying forever. Embedding inputs are bounded at 16K characters and extraction output is constrained to a JSON Schema via Ollama's `response_format` so neither stage produces routine poison pills (see [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)).
+- **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately. Each episode moves through a `pending → processing → completed | failed` state machine with exponential backoff on failure (see [ADR-007](docs/adr/007-episode-processing-retry-backoff.md)); permanently-unprocessable episodes surface on the dashboard for operator triage rather than retrying forever. Database side effects before completion are idempotent, so requeueing after a partial failure does not duplicate facts or inflate provenance. Embedding inputs are bounded at 8K characters and extraction output is constrained to a JSON Schema via Ollama's `response_format` so neither stage produces routine poison pills (see [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)).
 - **Telemetry sampler**: a 1 Hz background task samples host CPU/memory, Ollama state, pipeline-stage p50 latency, queue counters, and recent failures into an in-process ring buffer. The dashboard subscribes via SSE at `/dashboard/api/stream/telemetry` (see [ADR-010](docs/adr/010-streaming-telemetry.md)). No new tables, no time-series store.
 
 ## Supported Clients
@@ -503,7 +503,7 @@ Stores an episode and queues it for async extraction. Returns immediately.
 | `occurred_at` | ISO 8601 | no | When the interaction happened (defaults to now) |
 | `metadata` | object | no | Arbitrary source-specific metadata |
 | `participants` | string[] | no | People involved in the interaction |
-| `source_event_id` | string | no | Deduplication key within source |
+| `source_event_id` | string | no | Deduplication key within namespace + source |
 
 **Response:**
 
@@ -517,9 +517,9 @@ Stores an episode and queues it for async extraction. Returns immediately.
 | Status | Meaning |
 |--------|---------|
 | `queued` | Episode stored, extraction will run asynchronously |
-| `duplicate` | Episode already exists (content hash or source_event_id match) |
+| `duplicate` | Episode already exists in this namespace (content hash or source_event_id match) |
 
-**Idempotency:** Duplicate detection uses content SHA-256 hash and `(source, source_event_id)` unique constraint. Safe to retry.
+**Idempotency:** Duplicate detection uses content SHA-256 hash within the namespace and a `(namespace, source, source_event_id)` unique key. Safe to retry; the same source event can be ingested into another namespace as a distinct episode.
 
 ---
 
@@ -940,7 +940,7 @@ project-loom/
 │   │   ├── 008-mcp-wire-protocol.md                  # JSON-RPC 2.0 dispatcher at POST /mcp
 │   │   ├── 009-extraction-model-for-igpu.md          # qwen2.5:14b for shared-memory hosts
 │   │   ├── 010-streaming-telemetry.md                # SSE Runtime page
-│   │   └── 011-bounded-inputs-constrained-outputs.md # 16K embed cap + json_schema extraction
+│   │   └── 011-bounded-inputs-constrained-outputs.md # 8K embed cap + json_schema extraction
 │   └── clients/                        # Per-client integration guides
 │       ├── README.md                   # Index + new-client checklist
 │       ├── claude-code.md

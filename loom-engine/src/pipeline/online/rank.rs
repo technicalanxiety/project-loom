@@ -26,9 +26,7 @@
 
 use chrono::Utc;
 
-use crate::pipeline::online::retrieve::{
-    CandidatePayload, MemoryType, RetrievalCandidate,
-};
+use crate::pipeline::online::retrieve::{CandidatePayload, RetrievalCandidate};
 use crate::pipeline::online::weight::WeightedCandidate;
 use crate::types::compilation::RankingScore;
 
@@ -161,8 +159,7 @@ pub fn score_stability(candidate: &RetrievalCandidate) -> f64 {
     match &candidate.payload {
         CandidatePayload::Fact(f) => {
             // Non-superseded facts get a base stability.
-            let is_current = f.evidence_status != "superseded"
-                && f.evidence_status != "deprecated";
+            let is_current = f.evidence_status != "superseded" && f.evidence_status != "deprecated";
             let base = if is_current { 0.5 } else { 0.1 };
             let authority = evidence_authority(&f.evidence_status) * 0.3;
             // Default salience for facts (actual salience would come from
@@ -185,8 +182,7 @@ pub fn score_stability(candidate: &RetrievalCandidate) -> f64 {
         CandidatePayload::Procedure(p) => {
             // Procedures: stability based on confidence and observation count.
             let confidence_component = p.confidence * 0.5;
-            let observation_component =
-                (p.observation_count as f64 / 10.0).min(1.0) * 0.5;
+            let observation_component = (p.observation_count as f64 / 10.0).min(1.0) * 0.5;
             (confidence_component + observation_component).clamp(0.0, 1.0)
         }
     }
@@ -227,8 +223,7 @@ fn score_provenance_base(candidate: &RetrievalCandidate) -> f64 {
     match &candidate.payload {
         CandidatePayload::Fact(f) => {
             // Source episode count: normalize to [0, 1] (cap at 5 episodes).
-            let episode_score =
-                (f.source_episodes.len() as f64 / 5.0).min(1.0) * 0.5;
+            let episode_score = (f.source_episodes.len() as f64 / 5.0).min(1.0) * 0.5;
             let authority = evidence_authority(&f.evidence_status) * 0.5;
             (episode_score + authority).clamp(0.0, 1.0)
         }
@@ -242,8 +237,7 @@ fn score_provenance_base(candidate: &RetrievalCandidate) -> f64 {
         }
         CandidatePayload::Procedure(p) => {
             // Procedures: provenance based on observation count.
-            let obs_score =
-                (p.observation_count as f64 / 10.0).min(1.0) * 0.6;
+            let obs_score = (p.observation_count as f64 / 10.0).min(1.0) * 0.6;
             let confidence_score = p.confidence * 0.4;
             (obs_score + confidence_score).clamp(0.0, 1.0)
         }
@@ -319,10 +313,7 @@ pub fn rank_candidates(weighted: Vec<WeightedCandidate>) -> Vec<RankedCandidate>
 ///
 /// Estimates token count per candidate and removes lowest-ranked candidates
 /// until the total fits within the budget. Returns the trimmed list.
-pub fn trim_to_budget(
-    ranked: Vec<RankedCandidate>,
-    token_budget: usize,
-) -> Vec<RankedCandidate> {
+pub fn trim_to_budget(ranked: Vec<RankedCandidate>, token_budget: usize) -> Vec<RankedCandidate> {
     // Simple token estimation: ~50 tokens per fact, ~100 per episode,
     // ~30 per graph result, ~40 per procedure.
     let mut total_tokens = 0usize;
@@ -376,8 +367,8 @@ fn estimate_tokens(candidate: &RetrievalCandidate) -> usize {
 mod tests {
     use super::*;
     use crate::pipeline::online::retrieve::{
-        CandidatePayload, EpisodeCandidate, FactCandidate,
-        ProcedureCandidate, RetrievalCandidate, RetrievalProfile,
+        CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType, ProcedureCandidate,
+        RetrievalCandidate, RetrievalProfile,
     };
     use crate::pipeline::online::weight::WeightedCandidate;
     use crate::types::compilation::RankingScore;
@@ -398,12 +389,12 @@ mod tests {
             memory_type: MemoryType::Semantic,
             payload: CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "Rust".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "PostgreSQL".to_string(),
                 evidence_status: evidence_status.to_string(),
-                source_episodes: (0..source_episode_count)
-                    .map(|_| Uuid::new_v4())
-                    .collect(),
+                source_episodes: (0..source_episode_count).map(|_| Uuid::new_v4()).collect(),
                 namespace: "default".to_string(),
             }),
             provenance_mode: None,

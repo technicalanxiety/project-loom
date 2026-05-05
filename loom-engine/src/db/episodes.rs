@@ -61,14 +61,22 @@ pub struct NewEpisode {
 
 /// Insert a new episode with idempotency check.
 ///
-/// If an episode with the same `(source, source_event_id)` already exists the
-/// existing row is returned instead of inserting a duplicate.
+/// If an episode with the same `(namespace, source, source_event_id)` already
+/// exists the existing row is returned instead of inserting a duplicate.
 pub async fn insert_episode(pool: &PgPool, ep: &NewEpisode) -> Result<Episode, EpisodeError> {
-    // Check for existing episode by (source, source_event_id) when both are present.
+    // Check for existing episode by (namespace, source, source_event_id) when
+    // an event id is present.
     if let Some(ref event_id) = ep.source_event_id {
         let existing: Option<Episode> = sqlx::query_as::<_, Episode>(
-            "SELECT * FROM loom_episodes WHERE source = $1 AND source_event_id = $2",
+            r#"
+            SELECT *
+            FROM loom_episodes
+            WHERE namespace = $1
+              AND source = $2
+              AND source_event_id = $3
+            "#,
         )
+        .bind(&ep.namespace)
         .bind(&ep.source)
         .bind(event_id)
         .fetch_optional(pool)

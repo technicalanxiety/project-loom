@@ -18,11 +18,7 @@ use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
 use loom_engine::{
-    api::{
-        auth::require_bearer_token,
-        mcp::AppState,
-        mcp_rpc::handle_mcp_rpc,
-    },
+    api::{auth::require_bearer_token, mcp::AppState, mcp_rpc::handle_mcp_rpc},
     config::{AppConfig, LlmConfig},
     db::pool::DbPools,
     llm::client::LlmClient,
@@ -267,7 +263,10 @@ async fn unknown_method_returns_method_not_found() {
 
     let json = body_json(resp).await;
     assert_eq!(json["id"], 99);
-    assert!(json["result"].is_null(), "unknown method must not return result");
+    assert!(
+        json["result"].is_null(),
+        "unknown method must not return result"
+    );
     assert_eq!(json["error"]["code"], -32601);
     assert!(json["error"]["message"]
         .as_str()

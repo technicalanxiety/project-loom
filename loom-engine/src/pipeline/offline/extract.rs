@@ -146,10 +146,8 @@ pub async fn run_full_extraction_pipeline(
     // -- Step 1: Generate and store episode embedding -----------------------
     tracing::debug!(episode_id = %episode_id, "step 1: generating episode embedding");
 
-    let embedding_vec = embeddings::generate_episode_embedding(
-        client, config, &episode.content,
-    )
-    .await?;
+    let embedding_vec =
+        embeddings::generate_episode_embedding(client, config, &episode.content).await?;
     let embedding = Vector::from(embedding_vec);
 
     episodes_db::store_episode_embedding(pool, episode_id, &embedding).await?;
@@ -159,10 +157,7 @@ pub async fn run_full_extraction_pipeline(
     // -- Step 2: Extract entities via LLM -----------------------------------
     tracing::debug!(episode_id = %episode_id, "step 2: extracting entities");
 
-    let entity_result = extract_entities_from_episode(
-        client, config, &episode.content,
-    )
-    .await?;
+    let entity_result = extract_entities_from_episode(client, config, &episode.content).await?;
 
     let extraction_model = entity_result.model.clone();
     let extracted_entities = entity_result.entities;
@@ -315,13 +310,7 @@ pub async fn run_full_extraction_pipeline(
         &extraction_model,
     );
 
-    state::store_metrics_and_mark_processed(
-        pool,
-        episode_id,
-        &metrics,
-        &extraction_model,
-    )
-    .await?;
+    state::store_metrics_and_mark_processed(pool, episode_id, &metrics, &extraction_model).await?;
 
     tracing::info!(
         episode_id = %episode_id,
@@ -640,7 +629,12 @@ pub async fn orchestrate_fact_extraction(
     let entity_names: Vec<String> = entity_map.keys().cloned().collect();
 
     let extraction_result = extract_facts_from_episode(
-        client, config, pool, namespace, episode_content, &entity_names,
+        client,
+        config,
+        pool,
+        namespace,
+        episode_content,
+        &entity_names,
     )
     .await?;
 
@@ -670,7 +664,9 @@ pub async fn orchestrate_fact_extraction(
                 // fact must all be in the same namespace (Requirement 7.4).
                 if let Err(e) = crate::pipeline::online::namespace::validate_fact_namespace(
                     pool, subj_id, obj_id, namespace,
-                ).await {
+                )
+                .await
+                {
                     tracing::warn!(
                         subject_id = %subj_id,
                         object_id = %obj_id,
@@ -742,13 +738,9 @@ pub async fn orchestrate_fact_extraction(
         .collect();
 
     let predicate_validation = if !valid_facts.is_empty() {
-        let result = validate_and_track_predicates(
-            &mut valid_facts,
-            &inserted_fact_ids,
-            pool,
-            episode_id,
-        )
-        .await?;
+        let result =
+            validate_and_track_predicates(&mut valid_facts, &inserted_fact_ids, pool, episode_id)
+                .await?;
         Some(result)
     } else {
         None
@@ -851,7 +843,9 @@ pub async fn validate_and_track_predicates(
         } else {
             // Custom predicate: mark and track as candidate.
             fact.custom = true;
-            if let Err(e) = pred_db::insert_or_update_candidate(pool, &fact.predicate, fact_id).await {
+            if let Err(e) =
+                pred_db::insert_or_update_candidate(pool, &fact.predicate, fact_id).await
+            {
                 tracing::warn!(
                     predicate = %fact.predicate,
                     fact_id = %fact_id,
@@ -1292,8 +1286,7 @@ mod tests {
             azure_openai_key: None,
         };
 
-        let client =
-            crate::llm::client::LlmClient::new(&config).expect("should build client");
+        let client = crate::llm::client::LlmClient::new(&config).expect("should build client");
 
         let result =
             extract_entities_from_episode(&client, &config, "Alice uses Rust for programming")
@@ -1337,20 +1330,24 @@ mod tests {
             azure_openai_key: None,
         };
 
-        let client =
-            crate::llm::client::LlmClient::new(&config).expect("should build client");
+        let client = crate::llm::client::LlmClient::new(&config).expect("should build client");
 
-        let err =
-            extract_entities_from_episode(&client, &config, "some content")
-                .await
-                .unwrap_err();
+        let err = extract_entities_from_episode(&client, &config, "some content")
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, ExtractionError::Deserialization(_)));
     }
 
     // -- format_predicate_block ---------------------------------------------
 
-    fn make_predicate(name: &str, category: &str, pack: &str, desc: &str, inverse: Option<&str>) -> PredicateEntry {
+    fn make_predicate(
+        name: &str,
+        category: &str,
+        pack: &str,
+        desc: &str,
+        inverse: Option<&str>,
+    ) -> PredicateEntry {
         PredicateEntry {
             predicate: name.to_string(),
             category: category.to_string(),
@@ -1365,9 +1362,27 @@ mod tests {
     #[test]
     fn format_predicate_block_groups_by_pack() {
         let predicates = vec![
-            make_predicate("uses", "structural", "core", "Usage relationship", Some("used_by")),
-            make_predicate("depends_on", "structural", "core", "Dependency", Some("dependency_of")),
-            make_predicate("scoped_as", "regulatory", "grc", "Audit scope", Some("scoping_includes")),
+            make_predicate(
+                "uses",
+                "structural",
+                "core",
+                "Usage relationship",
+                Some("used_by"),
+            ),
+            make_predicate(
+                "depends_on",
+                "structural",
+                "core",
+                "Dependency",
+                Some("dependency_of"),
+            ),
+            make_predicate(
+                "scoped_as",
+                "regulatory",
+                "grc",
+                "Audit scope",
+                Some("scoping_includes"),
+            ),
         ];
 
         let block = format_predicate_block(&predicates);
@@ -1395,9 +1410,13 @@ mod tests {
 
     #[test]
     fn format_predicate_block_no_inverse() {
-        let predicates = vec![
-            make_predicate("custom_rel", "operational", "core", "A custom relationship", None),
-        ];
+        let predicates = vec![make_predicate(
+            "custom_rel",
+            "operational",
+            "core",
+            "A custom relationship",
+            None,
+        )];
 
         let block = format_predicate_block(&predicates);
         assert!(block.contains("- custom_rel (operational): A custom relationship"));
@@ -1406,17 +1425,15 @@ mod tests {
 
     #[test]
     fn format_predicate_block_no_description() {
-        let predicates = vec![
-            PredicateEntry {
-                predicate: "bare_pred".to_string(),
-                category: "structural".to_string(),
-                pack: "core".to_string(),
-                inverse: None,
-                description: None,
-                usage_count: Some(0),
-                created_at: None,
-            },
-        ];
+        let predicates = vec![PredicateEntry {
+            predicate: "bare_pred".to_string(),
+            category: "structural".to_string(),
+            pack: "core".to_string(),
+            inverse: None,
+            description: None,
+            usage_count: Some(0),
+            created_at: None,
+        }];
 
         let block = format_predicate_block(&predicates);
         assert!(block.contains("- bare_pred (structural)"));
@@ -1438,9 +1455,13 @@ mod tests {
 
     #[test]
     fn format_predicate_block_single_pack_single_predicate() {
-        let predicates = vec![
-            make_predicate("uses", "structural", "core", "Usage relationship", Some("used_by")),
-        ];
+        let predicates = vec![make_predicate(
+            "uses",
+            "structural",
+            "core",
+            "Usage relationship",
+            Some("used_by"),
+        )];
 
         let block = format_predicate_block(&predicates);
         assert!(block.contains("### core (structural)"));
@@ -1594,11 +1615,10 @@ mod tests {
         // custom=false.
         use std::collections::HashSet;
 
-        let canonical: HashSet<&str> = [
-            "uses", "used_by", "depends_on", "deployed_to", "implements",
-        ]
-        .into_iter()
-        .collect();
+        let canonical: HashSet<&str> =
+            ["uses", "used_by", "depends_on", "deployed_to", "implements"]
+                .into_iter()
+                .collect();
 
         let mut fact = crate::types::fact::ExtractedFact {
             subject: "ServiceA".to_string(),
@@ -1614,18 +1634,19 @@ mod tests {
             fact.custom = false;
         }
 
-        assert!(!fact.custom, "canonical predicate 'uses' should be custom=false");
+        assert!(
+            !fact.custom,
+            "canonical predicate 'uses' should be custom=false"
+        );
     }
 
     #[test]
     fn non_canonical_predicate_classified_as_custom() {
         use std::collections::HashSet;
 
-        let canonical: HashSet<&str> = [
-            "uses", "used_by", "depends_on", "deployed_to",
-        ]
-        .into_iter()
-        .collect();
+        let canonical: HashSet<&str> = ["uses", "used_by", "depends_on", "deployed_to"]
+            .into_iter()
+            .collect();
 
         let mut fact = crate::types::fact::ExtractedFact {
             subject: "ServiceA".to_string(),
@@ -1640,7 +1661,10 @@ mod tests {
             fact.custom = true;
         }
 
-        assert!(fact.custom, "non-canonical predicate 'talks_to' should be custom=true");
+        assert!(
+            fact.custom,
+            "non-canonical predicate 'talks_to' should be custom=true"
+        );
     }
 
     // -- Custom predicate candidate creation and flagging at 5 occurrences --
@@ -1781,7 +1805,13 @@ mod tests {
     fn prompt_assembly_core_only() {
         let predicates = vec![
             make_predicate("uses", "structural", "core", "Usage", Some("used_by")),
-            make_predicate("depends_on", "structural", "core", "Dependency", Some("dependency_of")),
+            make_predicate(
+                "depends_on",
+                "structural",
+                "core",
+                "Dependency",
+                Some("dependency_of"),
+            ),
         ];
 
         let block = format_predicate_block(&predicates);
@@ -1797,8 +1827,20 @@ mod tests {
     fn prompt_assembly_core_plus_grc() {
         let predicates = vec![
             make_predicate("uses", "structural", "core", "Usage", Some("used_by")),
-            make_predicate("scoped_as", "regulatory", "grc", "Audit scope", Some("scoping_includes")),
-            make_predicate("maps_to_control", "regulatory", "grc", "Control mapping", None),
+            make_predicate(
+                "scoped_as",
+                "regulatory",
+                "grc",
+                "Audit scope",
+                Some("scoping_includes"),
+            ),
+            make_predicate(
+                "maps_to_control",
+                "regulatory",
+                "grc",
+                "Control mapping",
+                None,
+            ),
         ];
 
         let block = format_predicate_block(&predicates);
@@ -1851,12 +1893,11 @@ mod tests {
 
     #[test]
     fn pipeline_error_embedding_displays_message() {
-        let err = PipelineError::Embedding(
-            crate::llm::embeddings::EmbeddingError::DimensionMismatch {
+        let err =
+            PipelineError::Embedding(crate::llm::embeddings::EmbeddingError::DimensionMismatch {
                 expected: 768,
                 actual: 512,
-            },
-        );
+            });
         let msg = err.to_string();
         assert!(msg.contains("embedding error"), "got: {msg}");
     }
@@ -1955,13 +1996,11 @@ mod tests {
 
     #[test]
     fn count_conflict_flagged_returns_zero() {
-        let results = vec![
-            crate::types::entity::ResolutionResult {
-                entity_id: Uuid::new_v4(),
-                method: "new".to_string(),
-                confidence: 1.0,
-            },
-        ];
+        let results = vec![crate::types::entity::ResolutionResult {
+            entity_id: Uuid::new_v4(),
+            method: "new".to_string(),
+            confidence: 1.0,
+        }];
         assert_eq!(count_conflict_flagged(&results), 0);
     }
 }

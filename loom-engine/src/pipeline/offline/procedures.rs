@@ -141,14 +141,8 @@ pub fn detect_patterns(facts: &[ExtractedFact]) -> Vec<DetectedPattern> {
     for (predicate, related_facts) in &predicate_counts {
         if related_facts.len() >= 2 {
             // Build a pattern description from the repeated predicate usage.
-            let subjects: Vec<&str> = related_facts
-                .iter()
-                .map(|f| f.subject.as_str())
-                .collect();
-            let objects: Vec<&str> = related_facts
-                .iter()
-                .map(|f| f.object.as_str())
-                .collect();
+            let subjects: Vec<&str> = related_facts.iter().map(|f| f.subject.as_str()).collect();
+            let objects: Vec<&str> = related_facts.iter().map(|f| f.object.as_str()).collect();
 
             let pattern_desc = format!(
                 "When working with {}, {} is applied to {}",
@@ -257,10 +251,8 @@ pub async fn flag_candidate_procedures(
 
     for pattern in &detected {
         // Generate embedding for the pattern text.
-        let embedding_vec = embeddings::generate_embedding(
-            client, config, &pattern.pattern,
-        )
-        .await?;
+        let embedding_vec =
+            embeddings::generate_embedding(client, config, &pattern.pattern).await?;
         let embedding = Vector::from(embedding_vec.clone());
 
         // Check for existing similar procedure in the namespace.
@@ -268,38 +260,44 @@ pub async fn flag_candidate_procedures(
 
         match existing {
             Some(existing_proc) => {
-                // Increment observation on existing procedure.
-                procedures::update_observation(pool, existing_proc.id, episode_id).await?;
+                procedure_ids.push(existing_proc.id);
 
-                // Update confidence.
-                let new_confidence = compute_new_confidence(
-                    existing_proc.confidence.unwrap_or(INITIAL_CONFIDENCE),
-                    existing_proc.observation_count.unwrap_or(1),
-                );
-                update_procedure_confidence(pool, existing_proc.id, new_confidence).await?;
+                if procedures::update_observation(pool, existing_proc.id, episode_id).await? {
+                    // Update confidence.
+                    let new_confidence = compute_new_confidence(
+                        existing_proc.confidence.unwrap_or(INITIAL_CONFIDENCE),
+                        existing_proc.observation_count.unwrap_or(1),
+                    );
+                    update_procedure_confidence(pool, existing_proc.id, new_confidence).await?;
 
-                // Check promotion criteria.
-                let obs_count = existing_proc.observation_count.unwrap_or(1) + 1;
-                if should_promote(new_confidence, obs_count) {
-                    promote_procedure(pool, existing_proc.id).await?;
-                    promoted_count += 1;
-                    tracing::info!(
+                    // Check promotion criteria.
+                    let obs_count = existing_proc.observation_count.unwrap_or(1) + 1;
+                    if should_promote(new_confidence, obs_count) {
+                        promote_procedure(pool, existing_proc.id).await?;
+                        promoted_count += 1;
+                        tracing::info!(
+                            procedure_id = %existing_proc.id,
+                            confidence = new_confidence,
+                            observations = obs_count,
+                            "procedure promoted to 'promoted' status"
+                        );
+                    }
+
+                    updated_count += 1;
+
+                    tracing::debug!(
                         procedure_id = %existing_proc.id,
-                        confidence = new_confidence,
+                        new_confidence,
                         observations = obs_count,
-                        "procedure promoted to 'promoted' status"
+                        "existing procedure observation incremented"
+                    );
+                } else {
+                    tracing::debug!(
+                        procedure_id = %existing_proc.id,
+                        episode_id = %episode_id,
+                        "procedure observation already recorded"
                     );
                 }
-
-                procedure_ids.push(existing_proc.id);
-                updated_count += 1;
-
-                tracing::debug!(
-                    procedure_id = %existing_proc.id,
-                    new_confidence,
-                    observations = obs_count,
-                    "existing procedure observation incremented"
-                );
             }
             None => {
                 // Create a new procedure candidate.
@@ -530,7 +528,10 @@ mod tests {
     #[test]
     fn should_promote_boundary_values() {
         // Exactly at threshold.
-        assert!(should_promote(PROMOTION_CONFIDENCE_THRESHOLD, PROMOTION_OBSERVATION_THRESHOLD));
+        assert!(should_promote(
+            PROMOTION_CONFIDENCE_THRESHOLD,
+            PROMOTION_OBSERVATION_THRESHOLD
+        ));
         // Just below confidence.
         assert!(!should_promote(
             PROMOTION_CONFIDENCE_THRESHOLD - 0.01,

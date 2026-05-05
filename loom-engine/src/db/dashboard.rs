@@ -89,9 +89,7 @@ struct CountRow {
 ///
 /// Runs multiple count queries to build a comprehensive health summary
 /// for the dashboard overview panel.
-pub async fn get_pipeline_health(
-    pool: &PgPool,
-) -> Result<PipelineHealth, DashboardError> {
+pub async fn get_pipeline_health(pool: &PgPool) -> Result<PipelineHealth, DashboardError> {
     let total_episodes = sqlx::query_as::<_, CountRow>(
         "SELECT COUNT(*) AS count FROM loom_episodes WHERE deleted_at IS NULL",
     )
@@ -199,9 +197,7 @@ pub async fn get_compilation_traces(
 ///
 /// Returns conflicts ordered by creation time (newest first) for the
 /// dashboard conflict review queue.
-pub async fn get_conflict_queue(
-    pool: &PgPool,
-) -> Result<Vec<ResolutionConflict>, DashboardError> {
+pub async fn get_conflict_queue(pool: &PgPool) -> Result<Vec<ResolutionConflict>, DashboardError> {
     let rows = sqlx::query_as::<_, ResolutionConflict>(
         r#"
         SELECT *
@@ -277,9 +273,7 @@ pub async fn get_predicate_candidates(
 ///
 /// Returns namespace info from `loom_namespace_config` for the dashboard
 /// namespace selector.
-pub async fn get_namespace_list(
-    pool: &PgPool,
-) -> Result<Vec<NamespaceInfo>, DashboardError> {
+pub async fn get_namespace_list(pool: &PgPool) -> Result<Vec<NamespaceInfo>, DashboardError> {
     let rows = sqlx::query_as::<_, NamespaceInfo>(
         r#"
         SELECT namespace, description, hot_tier_budget, warm_tier_budget,

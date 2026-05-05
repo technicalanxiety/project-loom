@@ -20,7 +20,7 @@ pub struct Episode {
     pub source: String,
     /// External system identifier.
     pub source_id: Option<String>,
-    /// Deduplication key within source.
+    /// Deduplication key within namespace + source.
     pub source_event_id: Option<String>,
     /// Raw episode text content.
     pub content: String,

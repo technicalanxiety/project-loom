@@ -27,13 +27,8 @@ fn learn_status() -> impl Strategy<Value = String> {
 
 /// Strategy for generating a model name string.
 fn model_name() -> impl Strategy<Value = String> {
-    prop::sample::select(&[
-        "gemma4:26b",
-        "gemma4:e4b",
-        "gpt-4.1-mini",
-        "test-model",
-    ][..])
-    .prop_map(|s| s.to_string())
+    prop::sample::select(&["gemma4:26b", "gemma4:e4b", "gpt-4.1-mini", "test-model"][..])
+        .prop_map(|s| s.to_string())
 }
 
 /// Strategy for generating an evidence strength value.

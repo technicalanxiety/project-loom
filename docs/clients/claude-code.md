@@ -91,7 +91,7 @@ export LOOM_NAMESPACE="your-project-namespace"
 
 The hook derives its `source_event_id` from the session file's path +
 mtime, so re-running it on the same session is a no-op at the
-content-hash layer.
+content-hash layer within the configured namespace.
 
 ## Vendor import — bootstrap from local JSONL
 
@@ -110,9 +110,9 @@ python3 bootstrap/claude_code_parser.py \
     --namespace my-project
 ```
 
-Sessions are deduped by content hash + `source_event_id`, so this is
-safe to re-run — the hook-captured episodes and the backfilled
-episodes coexist.
+Sessions are deduped by content hash within the namespace plus
+`(namespace, source, source_event_id)`, so this is safe to re-run — the
+hook-captured episodes and the backfilled episodes coexist.
 
 ## Namespaces
 

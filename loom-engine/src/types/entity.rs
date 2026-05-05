@@ -211,8 +211,8 @@ mod tests {
         ];
 
         for (json_str, expected) in &types {
-            let result: EntityType =
-                serde_json::from_str(json_str).unwrap_or_else(|e| panic!("failed to deserialize {json_str}: {e}"));
+            let result: EntityType = serde_json::from_str(json_str)
+                .unwrap_or_else(|e| panic!("failed to deserialize {json_str}: {e}"));
             assert_eq!(&result, expected, "mismatch for {json_str}");
         }
     }
@@ -224,7 +224,7 @@ mod tests {
             "\"concept\"",
             "\"widget\"",
             "\"\"",
-            "\"Person\"",  // case-sensitive: serde rename_all = lowercase
+            "\"Person\"", // case-sensitive: serde rename_all = lowercase
             "\"TECHNOLOGY\"",
         ];
 
@@ -280,19 +280,33 @@ mod tests {
                 .expect("should serialize")
                 .trim_matches('"')
                 .to_string();
-            assert_eq!(display, serde_str, "Display and serde mismatch for {:?}", variant);
+            assert_eq!(
+                display, serde_str,
+                "Display and serde mismatch for {:?}",
+                variant
+            );
         }
     }
 
     #[test]
     fn entity_type_from_str_roundtrips() {
         let type_strings = [
-            "person", "organization", "project", "service", "technology",
-            "pattern", "environment", "document", "metric", "decision",
+            "person",
+            "organization",
+            "project",
+            "service",
+            "technology",
+            "pattern",
+            "environment",
+            "document",
+            "metric",
+            "decision",
         ];
 
         for s in &type_strings {
-            let parsed: EntityType = s.parse().unwrap_or_else(|e| panic!("failed to parse {s}: {e}"));
+            let parsed: EntityType = s
+                .parse()
+                .unwrap_or_else(|e| panic!("failed to parse {s}: {e}"));
             assert_eq!(&parsed.to_string(), s, "roundtrip failed for {s}");
         }
     }
@@ -317,8 +331,7 @@ mod tests {
             "properties": {"version": "1.80"}
         });
 
-        let entity: ExtractedEntity =
-            serde_json::from_value(json).expect("should deserialize");
+        let entity: ExtractedEntity = serde_json::from_value(json).expect("should deserialize");
         assert_eq!(entity.name, "Rust");
         assert_eq!(entity.entity_type, "technology");
         assert_eq!(entity.aliases, vec!["rust-lang", "Rust Language"]);
@@ -332,8 +345,7 @@ mod tests {
             "entity_type": "person"
         });
 
-        let entity: ExtractedEntity =
-            serde_json::from_value(json).expect("should deserialize");
+        let entity: ExtractedEntity = serde_json::from_value(json).expect("should deserialize");
         assert_eq!(entity.name, "Alice");
         assert_eq!(entity.entity_type, "person");
         assert!(entity.aliases.is_empty());

@@ -170,10 +170,16 @@ mod tests {
     /// Helper to create a candidate with a given memory type and score.
     fn make_candidate(memory_type: MemoryType, score: f64) -> RetrievalCandidate {
         let profile = match &memory_type {
-            MemoryType::Episodic => crate::pipeline::online::retrieve::RetrievalProfile::EpisodeRecall,
+            MemoryType::Episodic => {
+                crate::pipeline::online::retrieve::RetrievalProfile::EpisodeRecall
+            }
             MemoryType::Semantic => crate::pipeline::online::retrieve::RetrievalProfile::FactLookup,
-            MemoryType::Graph => crate::pipeline::online::retrieve::RetrievalProfile::GraphNeighborhood,
-            MemoryType::Procedural => crate::pipeline::online::retrieve::RetrievalProfile::ProcedureAssist,
+            MemoryType::Graph => {
+                crate::pipeline::online::retrieve::RetrievalProfile::GraphNeighborhood
+            }
+            MemoryType::Procedural => {
+                crate::pipeline::online::retrieve::RetrievalProfile::ProcedureAssist
+            }
         };
 
         let payload = match &memory_type {
@@ -185,22 +191,24 @@ mod tests {
             }),
             MemoryType::Semantic => CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "subject".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "object".to_string(),
                 evidence_status: "extracted".to_string(),
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
             }),
-            MemoryType::Graph => CandidatePayload::Graph(
-                crate::pipeline::online::retrieve::GraphCandidate {
+            MemoryType::Graph => {
+                CandidatePayload::Graph(crate::pipeline::online::retrieve::GraphCandidate {
                     entity_id: Uuid::new_v4(),
                     entity_name: "test".to_string(),
                     entity_type: "service".to_string(),
                     fact_id: None,
                     predicate: None,
                     hop_depth: 1,
-                },
-            ),
+                })
+            }
             MemoryType::Procedural => CandidatePayload::Procedure(ProcedureCandidate {
                 pattern: "test pattern".to_string(),
                 confidence: 0.9,
@@ -334,8 +342,17 @@ mod tests {
 
     #[test]
     fn weight_for_memory_type_returns_correct_values() {
-        assert!((weight_for_memory_type(&TaskClass::Debug, &MemoryType::Episodic) - 1.0).abs() < f64::EPSILON);
-        assert!((weight_for_memory_type(&TaskClass::Compliance, &MemoryType::Procedural) - 0.0).abs() < f64::EPSILON);
-        assert!((weight_for_memory_type(&TaskClass::Architecture, &MemoryType::Graph) - 1.0).abs() < f64::EPSILON);
+        assert!(
+            (weight_for_memory_type(&TaskClass::Debug, &MemoryType::Episodic) - 1.0).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (weight_for_memory_type(&TaskClass::Compliance, &MemoryType::Procedural) - 0.0).abs()
+                < f64::EPSILON
+        );
+        assert!(
+            (weight_for_memory_type(&TaskClass::Architecture, &MemoryType::Graph) - 1.0).abs()
+                < f64::EPSILON
+        );
     }
 }

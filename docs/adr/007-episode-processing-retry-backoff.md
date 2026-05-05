@@ -93,6 +93,25 @@ Operator surface:
   health signal; a non-zero value means the pipeline has unresolved
   work that isn't going to progress without human attention.
 
+Amendment: retryable side effects are idempotent (migration 017). The
+state machine bounds retry frequency, but a processing attempt can fail
+after some database writes have already happened and before
+`mark_episode_processed` transitions the episode to `completed`.
+Therefore every write before the final completion mark must tolerate a
+second pass over the same episode:
+
+- Episode idempotency keys are namespace-scoped:
+  `(namespace, source, source_event_id)`.
+- Exact fact rows are unique by
+  `(namespace, subject_id, predicate, object_id, source_episodes)` for
+  non-deleted rows. Retrying an episode reuses the existing fact instead
+  of inserting another current copy.
+- Supersession resolution skips retry-returned facts that are no longer
+  current, so a requeue cannot reverse or corrupt an already-resolved
+  temporal chain.
+- Entity `source_episodes` links and procedure observations ignore an
+  episode already present in their provenance arrays.
+
 ## Alternatives considered
 
 1. **Dead-letter table.** Move `failed` rows to `loom_episodes_dead` for
@@ -133,6 +152,9 @@ Operator surface:
   episodes that are actively being retried are not.
 - Atomic claim makes the design multi-replica-safe for free. We don't
   need it yet, but we paid nothing to keep the option.
+- Requeueing an episode after a partial failure no longer duplicates
+  current facts or inflates entity/procedure provenance. Retries are
+  bounded in load and safe in database effects.
 
 ### Negative
 
@@ -140,6 +162,10 @@ Operator surface:
   system. Size impact is small (INTEGER + TIMESTAMPTZ + a mostly-NULL
   TEXT), but every write path now touches more columns. Acceptable
   tradeoff for the correctness win.
+- Migration 017 adds two more uniqueness indexes: namespace-scoped
+  source-event dedup on episodes, and exact fact/provenance dedup on
+  current facts. This is extra write-path constraint checking, accepted
+  to keep retry/requeue behavior correct.
 - Two configuration knobs. `EPISODE_MAX_ATTEMPTS` and
   `EPISODE_BACKOFF_BASE_SECS` are yet another pair of env vars the
   operator has to understand. Documented in `.env.example` and

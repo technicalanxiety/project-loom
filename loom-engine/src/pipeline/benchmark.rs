@@ -51,16 +51,16 @@ use crate::config::AppConfig;
 use crate::db::pool::DbPools;
 use crate::llm::client::LlmClient;
 use crate::llm::embeddings;
+use crate::pipeline::online::retrieve::MemoryType;
 use crate::pipeline::online::{
     compile::{
-        self, CompilationInput, DEFAULT_WARM_TIER_BUDGET, HotEntity, HotFact, HotTierItem,
-        HotTierPayload,
+        self, CompilationInput, HotEntity, HotFact, HotTierItem, HotTierPayload,
+        DEFAULT_WARM_TIER_BUDGET,
     },
     rank::{self, RankedCandidate},
     retrieve::{self, CandidatePayload},
     weight,
 };
-use crate::pipeline::online::retrieve::MemoryType;
 use crate::types::benchmark::{
     BenchmarkComparison, BenchmarkComparisonSummary, BenchmarkCondition, BenchmarkResult,
     BenchmarkRunSummary, BenchmarkTask, ConditionSummary,
@@ -120,7 +120,10 @@ pub fn benchmark_tasks() -> Vec<BenchmarkTask> {
             name: "arch_data_flow".to_string(),
             query: "How does data flow from ingestion to the analytics dashboard?".to_string(),
             namespace: "benchmark".to_string(),
-            expected_entities: vec!["Data Pipeline".to_string(), "Analytics Dashboard".to_string()],
+            expected_entities: vec![
+                "Data Pipeline".to_string(),
+                "Analytics Dashboard".to_string(),
+            ],
             expected_facts: vec!["produces".to_string(), "consumes".to_string()],
         },
         BenchmarkTask {
@@ -148,7 +151,10 @@ pub fn benchmark_tasks() -> Vec<BenchmarkTask> {
             name: "writing_runbook".to_string(),
             query: "Write a runbook for the deployment pipeline rollback procedure".to_string(),
             namespace: "benchmark".to_string(),
-            expected_entities: vec!["CI/CD Pipeline".to_string(), "Kubernetes Cluster".to_string()],
+            expected_entities: vec![
+                "CI/CD Pipeline".to_string(),
+                "Kubernetes Cluster".to_string(),
+            ],
             expected_facts: vec!["deploys_to".to_string(), "manages".to_string()],
         },
         BenchmarkTask {
@@ -396,7 +402,9 @@ async fn warm_budget(pool: &PgPool, namespace: &str) -> usize {
     .fetch_optional(pool)
     .await
     .unwrap_or(None);
-    budget.map(|b| b as usize).unwrap_or(DEFAULT_WARM_TIER_BUDGET)
+    budget
+        .map(|b| b as usize)
+        .unwrap_or(DEFAULT_WARM_TIER_BUDGET)
 }
 
 // Row types for the hot-tier queries below.
@@ -817,8 +825,8 @@ async fn run_condition_c(
 /// One markdown document from `loom-engine/seed/benchmark/` — content embedded at compile
 /// time via `include_str!` so the engine ships with the corpus and doesn't
 /// need a runtime filesystem path. The `event_id` is stable across calls so
-/// the (`source`, `source_event_id`) unique constraint makes seeding
-/// idempotent — clicking "Seed benchmark data" twice is harmless.
+/// the (`namespace`, `source`, `source_event_id`) unique constraint makes
+/// seeding idempotent — clicking "Seed benchmark data" twice is harmless.
 struct SeedDoc {
     /// Stable identifier used as `source_event_id`. Must not change between
     /// releases without resetting the benchmark namespace.
@@ -900,9 +908,7 @@ fn content_hash(content: &str) -> String {
 /// The extraction worker will pick the new episodes up on its next pending
 /// poll; entities and facts won't be available until extraction settles —
 /// minutes on iGPU. Operators see this on the Compilations page.
-pub async fn seed_benchmark_namespace(
-    pool: &PgPool,
-) -> Result<SeedSummary, BenchmarkError> {
+pub async fn seed_benchmark_namespace(pool: &PgPool) -> Result<SeedSummary, BenchmarkError> {
     use crate::db::episodes::{insert_episode, NewEpisode};
 
     let now = Utc::now();
@@ -913,7 +919,7 @@ pub async fn seed_benchmark_namespace(
         let hash = content_hash(doc.content);
 
         // Pre-check covers both dedup keys POST /api/learn uses: matching the
-        // (source, source_event_id) pair (re-seed after interrupted run) or
+        // namespace/source/source_event_id tuple (re-seed after interrupted run) or
         // matching the content_hash within the namespace (already seeded via
         // CLI with the same file).
         let already_present: bool = sqlx::query_scalar(
@@ -956,10 +962,15 @@ pub async fn seed_benchmark_namespace(
     }
 
     tracing::info!(
-        inserted, duplicates, total = SEED_DOCS.len(),
+        inserted,
+        duplicates,
+        total = SEED_DOCS.len(),
         "benchmark seed corpus posted to namespace=benchmark"
     );
-    Ok(SeedSummary { inserted, duplicates })
+    Ok(SeedSummary {
+        inserted,
+        duplicates,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,7 +1104,8 @@ pub async fn reap_stale_benchmark_runs(
     let count: i64 = sqlx::query_scalar(&sql).fetch_one(pool).await?;
     if count > 0 {
         tracing::warn!(
-            count, threshold_hours,
+            count,
+            threshold_hours,
             "marked stale benchmark runs as failed"
         );
     }
@@ -1111,10 +1123,7 @@ pub async fn reap_stale_benchmark_runs(
 ///
 /// Returns `true` if the row was running and is now failed, `false` if
 /// the row was already in a terminal state (no-op).
-pub async fn cancel_benchmark_run(
-    pool: &PgPool,
-    run_id: Uuid,
-) -> Result<bool, BenchmarkError> {
+pub async fn cancel_benchmark_run(pool: &PgPool, run_id: Uuid) -> Result<bool, BenchmarkError> {
     let updated: Option<(Uuid,)> = sqlx::query_as(
         "UPDATE loom_benchmark_runs \
          SET status = 'failed' \
@@ -1128,7 +1137,9 @@ pub async fn cancel_benchmark_run(
 }
 
 /// List all benchmark runs ordered by most recent first.
-pub async fn list_benchmark_runs(pool: &PgPool) -> Result<Vec<BenchmarkRunSummary>, BenchmarkError> {
+pub async fn list_benchmark_runs(
+    pool: &PgPool,
+) -> Result<Vec<BenchmarkRunSummary>, BenchmarkError> {
     let rows = sqlx::query_as::<_, BenchmarkRunRow>(
         "SELECT id, name, created_at, status FROM loom_benchmark_runs ORDER BY created_at DESC",
     )
@@ -1197,7 +1208,11 @@ pub async fn get_benchmark_detail(
 
     let summary = compute_summary(&results);
 
-    Ok(BenchmarkComparison { run, results, summary })
+    Ok(BenchmarkComparison {
+        run,
+        results,
+        summary,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,8 +1228,10 @@ fn compute_summary(results: &[BenchmarkResult]) -> BenchmarkComparisonSummary {
 }
 
 fn summarize_condition(results: &[BenchmarkResult], condition: &str) -> ConditionSummary {
-    let filtered: Vec<&BenchmarkResult> =
-        results.iter().filter(|r| r.condition == condition).collect();
+    let filtered: Vec<&BenchmarkResult> = results
+        .iter()
+        .filter(|r| r.condition == condition)
+        .collect();
 
     if filtered.is_empty() {
         return ConditionSummary {
@@ -1282,18 +1299,39 @@ mod tests {
     fn benchmark_tasks_cover_all_classes() {
         let tasks = benchmark_tasks();
         let names: Vec<&str> = tasks.iter().map(|t| t.name.as_str()).collect();
-        assert!(names.iter().any(|n| n.starts_with("debug_")), "missing debug tasks");
-        assert!(names.iter().any(|n| n.starts_with("arch_")), "missing architecture tasks");
-        assert!(names.iter().any(|n| n.starts_with("compliance_")), "missing compliance tasks");
-        assert!(names.iter().any(|n| n.starts_with("writing_")), "missing writing tasks");
-        assert!(names.iter().any(|n| n.starts_with("chat_")), "missing chat tasks");
+        assert!(
+            names.iter().any(|n| n.starts_with("debug_")),
+            "missing debug tasks"
+        );
+        assert!(
+            names.iter().any(|n| n.starts_with("arch_")),
+            "missing architecture tasks"
+        );
+        assert!(
+            names.iter().any(|n| n.starts_with("compliance_")),
+            "missing compliance tasks"
+        );
+        assert!(
+            names.iter().any(|n| n.starts_with("writing_")),
+            "missing writing tasks"
+        );
+        assert!(
+            names.iter().any(|n| n.starts_with("chat_")),
+            "missing chat tasks"
+        );
     }
 
     #[test]
     fn task_class_inferred_from_prefix() {
         assert_eq!(task_class_from_name("debug_auth_failure"), TaskClass::Debug);
-        assert_eq!(task_class_from_name("arch_service_topology"), TaskClass::Architecture);
-        assert_eq!(task_class_from_name("compliance_gdpr_audit"), TaskClass::Compliance);
+        assert_eq!(
+            task_class_from_name("arch_service_topology"),
+            TaskClass::Architecture
+        );
+        assert_eq!(
+            task_class_from_name("compliance_gdpr_audit"),
+            TaskClass::Compliance
+        );
         assert_eq!(task_class_from_name("writing_api_docs"), TaskClass::Writing);
         assert_eq!(task_class_from_name("chat_project_status"), TaskClass::Chat);
     }
@@ -1313,7 +1351,11 @@ mod tests {
 
     #[test]
     fn entity_match_partial() {
-        let entities = vec!["APIM".to_string(), "Auth Service".to_string(), "Redis".to_string()];
+        let entities = vec![
+            "APIM".to_string(),
+            "Auth Service".to_string(),
+            "Redis".to_string(),
+        ];
         let text = "The APIM gateway delegates to Auth Service.";
         let p = entity_match_fraction(text, &entities);
         assert!((p - 2.0 / 3.0).abs() < 1e-9);
@@ -1350,7 +1392,11 @@ mod tests {
     #[test]
     fn all_tasks_use_benchmark_namespace() {
         for task in benchmark_tasks() {
-            assert_eq!(task.namespace, "benchmark", "task {} uses wrong namespace", task.name);
+            assert_eq!(
+                task.namespace, "benchmark",
+                "task {} uses wrong namespace",
+                task.name
+            );
         }
     }
 

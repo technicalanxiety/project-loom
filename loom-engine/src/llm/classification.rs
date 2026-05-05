@@ -180,11 +180,13 @@ pub async fn classify_intent(
     }
 
     // Stage 2: LLM classification for ambiguous queries.
-    tracing::info!(model, query_len = query.len(), "starting LLM classification");
+    tracing::info!(
+        model,
+        query_len = query.len(),
+        "starting LLM classification"
+    );
 
-    let response = client
-        .call_llm(model, CLASSIFICATION_PROMPT, query)
-        .await?;
+    let response = client.call_llm(model, CLASSIFICATION_PROMPT, query).await?;
 
     let result = parse_classification_response(&response, model)?;
 
@@ -249,7 +251,11 @@ fn parse_classification_response(
     }
 
     // Sort by confidence descending.
-    entries.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    entries.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Parse the top class.
     let primary = parse_task_class(&entries[0].class).unwrap_or_else(|| {
@@ -309,9 +315,8 @@ fn deserialize_response(
     if let Some(text) = value.as_str() {
         let trimmed = text.trim();
         let json_text = strip_code_fences(trimmed);
-        return serde_json::from_str::<ClassificationResponse>(json_text).map_err(|e| {
-            ClassificationError::Deserialization(format!("classification: {e}"))
-        });
+        return serde_json::from_str::<ClassificationResponse>(json_text)
+            .map_err(|e| ClassificationError::Deserialization(format!("classification: {e}")));
     }
 
     Err(ClassificationError::Deserialization(
@@ -364,35 +369,86 @@ mod tests {
 
     #[test]
     fn keyword_precheck_detects_debug() {
-        assert_eq!(keyword_precheck("Why is this error happening?"), Some(TaskClass::Debug));
-        assert_eq!(keyword_precheck("The app keeps crashing"), Some(TaskClass::Debug));
-        assert_eq!(keyword_precheck("I see a stack trace in the logs"), Some(TaskClass::Debug));
-        assert_eq!(keyword_precheck("How do I FIX this?"), Some(TaskClass::Debug));
-        assert_eq!(keyword_precheck("There's a BUG in the parser"), Some(TaskClass::Debug));
+        assert_eq!(
+            keyword_precheck("Why is this error happening?"),
+            Some(TaskClass::Debug)
+        );
+        assert_eq!(
+            keyword_precheck("The app keeps crashing"),
+            Some(TaskClass::Debug)
+        );
+        assert_eq!(
+            keyword_precheck("I see a stack trace in the logs"),
+            Some(TaskClass::Debug)
+        );
+        assert_eq!(
+            keyword_precheck("How do I FIX this?"),
+            Some(TaskClass::Debug)
+        );
+        assert_eq!(
+            keyword_precheck("There's a BUG in the parser"),
+            Some(TaskClass::Debug)
+        );
     }
 
     #[test]
     fn keyword_precheck_detects_architecture() {
-        assert_eq!(keyword_precheck("Explain the architecture"), Some(TaskClass::Architecture));
-        assert_eq!(keyword_precheck("Show me the system diagram"), Some(TaskClass::Architecture));
-        assert_eq!(keyword_precheck("What is the microservice layout?"), Some(TaskClass::Architecture));
-        assert_eq!(keyword_precheck("Describe the module structure"), Some(TaskClass::Architecture));
+        assert_eq!(
+            keyword_precheck("Explain the architecture"),
+            Some(TaskClass::Architecture)
+        );
+        assert_eq!(
+            keyword_precheck("Show me the system diagram"),
+            Some(TaskClass::Architecture)
+        );
+        assert_eq!(
+            keyword_precheck("What is the microservice layout?"),
+            Some(TaskClass::Architecture)
+        );
+        assert_eq!(
+            keyword_precheck("Describe the module structure"),
+            Some(TaskClass::Architecture)
+        );
     }
 
     #[test]
     fn keyword_precheck_detects_compliance() {
-        assert_eq!(keyword_precheck("Run a compliance check"), Some(TaskClass::Compliance));
-        assert_eq!(keyword_precheck("Show the audit trail"), Some(TaskClass::Compliance));
-        assert_eq!(keyword_precheck("What is the governance policy?"), Some(TaskClass::Compliance));
-        assert_eq!(keyword_precheck("Assess the risk level"), Some(TaskClass::Compliance));
+        assert_eq!(
+            keyword_precheck("Run a compliance check"),
+            Some(TaskClass::Compliance)
+        );
+        assert_eq!(
+            keyword_precheck("Show the audit trail"),
+            Some(TaskClass::Compliance)
+        );
+        assert_eq!(
+            keyword_precheck("What is the governance policy?"),
+            Some(TaskClass::Compliance)
+        );
+        assert_eq!(
+            keyword_precheck("Assess the risk level"),
+            Some(TaskClass::Compliance)
+        );
     }
 
     #[test]
     fn keyword_precheck_detects_writing() {
-        assert_eq!(keyword_precheck("Write a summary"), Some(TaskClass::Writing));
-        assert_eq!(keyword_precheck("Draft a proposal"), Some(TaskClass::Writing));
-        assert_eq!(keyword_precheck("Generate a readme"), Some(TaskClass::Writing));
-        assert_eq!(keyword_precheck("Create doc for the API"), Some(TaskClass::Writing));
+        assert_eq!(
+            keyword_precheck("Write a summary"),
+            Some(TaskClass::Writing)
+        );
+        assert_eq!(
+            keyword_precheck("Draft a proposal"),
+            Some(TaskClass::Writing)
+        );
+        assert_eq!(
+            keyword_precheck("Generate a readme"),
+            Some(TaskClass::Writing)
+        );
+        assert_eq!(
+            keyword_precheck("Create doc for the API"),
+            Some(TaskClass::Writing)
+        );
     }
 
     #[test]
@@ -404,9 +460,15 @@ mod tests {
 
     #[test]
     fn keyword_precheck_is_case_insensitive() {
-        assert_eq!(keyword_precheck("ARCHITECTURE overview"), Some(TaskClass::Architecture));
+        assert_eq!(
+            keyword_precheck("ARCHITECTURE overview"),
+            Some(TaskClass::Architecture)
+        );
         assert_eq!(keyword_precheck("Debug the issue"), Some(TaskClass::Debug));
-        assert_eq!(keyword_precheck("COMPLIANCE report"), Some(TaskClass::Compliance));
+        assert_eq!(
+            keyword_precheck("COMPLIANCE report"),
+            Some(TaskClass::Compliance)
+        );
     }
 
     // -- parse_classification_response --------------------------------------
@@ -423,8 +485,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "gemma4:e4b").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Debug);
         assert!((output.result.primary_confidence - 0.85).abs() < f64::EPSILON);
         // Gap is 0.85 - 0.05 = 0.80 >= 0.3, so no secondary.
@@ -445,8 +506,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "gemma4:e4b").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Debug);
         assert!((output.result.primary_confidence - 0.45).abs() < f64::EPSILON);
         // Gap is 0.45 - 0.35 = 0.10 < 0.3, so secondary is present.
@@ -467,8 +527,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "gemma4:e4b").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Writing);
         // Gap is 0.60 - 0.30 = 0.30 >= 0.3, so no secondary.
         assert!(output.result.secondary_class.is_none());
@@ -478,8 +537,7 @@ mod tests {
     fn parse_response_defaults_to_chat_on_empty_classes() {
         let value = json!({"classes": []});
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "gemma4:e4b").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Chat);
         assert!((output.result.primary_confidence - 0.0).abs() < f64::EPSILON);
     }
@@ -496,8 +554,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "gemma4:e4b").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Chat);
         assert!((output.result.primary_confidence - 0.0).abs() < f64::EPSILON);
     }
@@ -511,8 +568,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "gemma4:e4b").expect("should parse");
         // Unknown class defaults to Chat.
         assert_eq!(output.result.primary_class, TaskClass::Chat);
     }
@@ -522,8 +578,8 @@ mod tests {
         let json_text = r#"{"classes": [{"class": "compliance", "confidence": 0.90}, {"class": "debug", "confidence": 0.05}, {"class": "architecture", "confidence": 0.02}, {"class": "writing", "confidence": 0.02}, {"class": "chat", "confidence": 0.01}]}"#;
         let value = serde_json::Value::String(json_text.to_string());
 
-        let output = parse_classification_response(&value, "gemma4:e4b")
-            .expect("should parse from string");
+        let output =
+            parse_classification_response(&value, "gemma4:e4b").expect("should parse from string");
         assert_eq!(output.result.primary_class, TaskClass::Compliance);
     }
 
@@ -602,8 +658,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "test")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "test").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Architecture);
         assert_eq!(output.result.secondary_class, Some(TaskClass::Debug));
     }
@@ -621,8 +676,7 @@ mod tests {
             ]
         });
 
-        let output = parse_classification_response(&value, "test")
-            .expect("should parse");
+        let output = parse_classification_response(&value, "test").expect("should parse");
         assert_eq!(output.result.primary_class, TaskClass::Architecture);
         assert!(output.result.secondary_class.is_none());
     }
@@ -672,16 +726,15 @@ mod tests {
             azure_openai_url: None,
             azure_openai_key: None,
         };
-        let client =
-            crate::llm::client::LlmClient::new(&config).expect("should build client");
+        let client = crate::llm::client::LlmClient::new(&config).expect("should build client");
         (client, config)
     }
 
     #[tokio::test]
     async fn classify_intent_keyword_match_no_llm_call() {
-        use wiremock::{MockServer, Mock};
         use wiremock::matchers::{method, path};
         use wiremock::ResponseTemplate;
+        use wiremock::{Mock, MockServer};
 
         let server = MockServer::start().await;
 
@@ -762,8 +815,7 @@ mod tests {
             .await;
 
         let (client, config) = test_config_for_classification(&server.uri());
-        let err = classify_intent(&client, &config, "Tell me something interesting")
-            .await;
+        let err = classify_intent(&client, &config, "Tell me something interesting").await;
 
         // The malformed response should result in a deserialization error.
         assert!(err.is_err());

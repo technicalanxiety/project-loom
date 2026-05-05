@@ -97,7 +97,9 @@ pub fn validate_parser_fields(
     parser_version: Option<&str>,
     parser_source_schema: Option<&str>,
 ) -> Result<(), String> {
-    let has_version = parser_version.map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let has_version = parser_version
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
     let has_schema = parser_source_schema
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
@@ -167,12 +169,13 @@ mod tests {
 
     #[test]
     fn validate_parser_fields_requires_both_for_vendor_import() {
-        assert!(
-            validate_parser_fields(IngestionMode::VendorImport, Some("p@1"), Some("schema_v1")).is_ok()
-        );
-        assert!(
-            validate_parser_fields(IngestionMode::VendorImport, Some("p@1"), None).is_err()
-        );
+        assert!(validate_parser_fields(
+            IngestionMode::VendorImport,
+            Some("p@1"),
+            Some("schema_v1")
+        )
+        .is_ok());
+        assert!(validate_parser_fields(IngestionMode::VendorImport, Some("p@1"), None).is_err());
         assert!(
             validate_parser_fields(IngestionMode::VendorImport, None, Some("schema_v1")).is_err()
         );
@@ -181,12 +184,8 @@ mod tests {
 
     #[test]
     fn validate_parser_fields_forbids_them_for_other_modes() {
-        assert!(
-            validate_parser_fields(IngestionMode::UserAuthoredSeed, None, None).is_ok()
-        );
-        assert!(
-            validate_parser_fields(IngestionMode::LiveMcpCapture, None, None).is_ok()
-        );
+        assert!(validate_parser_fields(IngestionMode::UserAuthoredSeed, None, None).is_ok());
+        assert!(validate_parser_fields(IngestionMode::LiveMcpCapture, None, None).is_ok());
         assert!(
             validate_parser_fields(IngestionMode::UserAuthoredSeed, Some("p@1"), None).is_err()
         );
@@ -198,10 +197,9 @@ mod tests {
     #[test]
     fn validate_parser_fields_treats_empty_strings_as_absent() {
         assert!(
-            validate_parser_fields(IngestionMode::VendorImport, Some(""), Some("schema_v1")).is_err()
+            validate_parser_fields(IngestionMode::VendorImport, Some(""), Some("schema_v1"))
+                .is_err()
         );
-        assert!(
-            validate_parser_fields(IngestionMode::UserAuthoredSeed, Some("   "), None).is_ok()
-        );
+        assert!(validate_parser_fields(IngestionMode::UserAuthoredSeed, Some("   "), None).is_ok());
     }
 }

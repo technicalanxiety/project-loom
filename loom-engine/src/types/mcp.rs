@@ -69,7 +69,7 @@ pub struct LearnRequest {
     /// People involved in the interaction.
     #[serde(default)]
     pub participants: Option<Vec<String>>,
-    /// Deduplication key within source.
+    /// Deduplication key within namespace + source.
     pub source_event_id: Option<String>,
 }
 

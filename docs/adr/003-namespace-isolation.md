@@ -23,6 +23,10 @@ Hard namespace isolation in MVP. No cross-namespace queries.
 - Queries are scoped to one namespace.
 - If the same real-world entity appears in two namespaces, it exists as two separate records.
 - Hot-tier content is namespace-scoped. No global hot tier.
+- Idempotency keys are scoped to the namespace boundary. In particular,
+  `source_event_id` dedup uses `(namespace, source, source_event_id)`;
+  the same source event replayed into two namespaces represents two
+  distinct episodes.
 
 ## Consequences
 
@@ -32,6 +36,9 @@ Hard namespace isolation in MVP. No cross-namespace queries.
 - No accidental data leakage between contexts.
 - Easier to reason about ranking and compilation within a single namespace.
 - Clean deletion semantics — drop a namespace, drop all its data.
+- Bootstrap and seed workflows can safely replay the same source export
+  into a different namespace without being suppressed by a row in the
+  original namespace.
 
 ### Negative
 

@@ -96,9 +96,11 @@ impl DbPools {
             .after_connect(move |conn, _meta| {
                 Box::pin(async move {
                     // Set per-connection statement timeout to prevent runaway queries.
-                    sqlx::query(&format!("SET statement_timeout = '{statement_timeout_ms}ms'"))
-                        .execute(&mut *conn)
-                        .await?;
+                    sqlx::query(&format!(
+                        "SET statement_timeout = '{statement_timeout_ms}ms'"
+                    ))
+                    .execute(&mut *conn)
+                    .await?;
                     Ok(())
                 })
             })
@@ -151,9 +153,7 @@ impl DbPools {
 
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
-                let delay = Duration::from_millis(
-                    BACKOFF_BASE_MS * 2u64.pow(attempt - 1),
-                );
+                let delay = Duration::from_millis(BACKOFF_BASE_MS * 2u64.pow(attempt - 1));
                 tracing::warn!(
                     attempt,
                     delay_ms = delay.as_millis() as u64,
@@ -213,10 +213,11 @@ impl DbPools {
     /// continues. Install via the `postgresql-<N>-pgaudit` package on
     /// Debian-derived images if you need it.
     async fn validate_extensions(&self) -> Result<(), PoolError> {
-        let extensions: Vec<String> =
-            sqlx::query_scalar("SELECT extname::text FROM pg_extension WHERE extname IN ('vector', 'pgaudit')")
-                .fetch_all(&self.online)
-                .await?;
+        let extensions: Vec<String> = sqlx::query_scalar(
+            "SELECT extname::text FROM pg_extension WHERE extname IN ('vector', 'pgaudit')",
+        )
+        .fetch_all(&self.online)
+        .await?;
 
         // Required extensions — missing means halt startup.
         for required in &["vector"] {
@@ -342,8 +343,8 @@ pub mod cache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::cache::TtlCache;
+    use super::*;
 
     #[test]
     fn missing_extension_error_displays_name() {

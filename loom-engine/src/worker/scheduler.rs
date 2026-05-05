@@ -185,7 +185,11 @@ async fn run_periodic<F, Fut>(
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<(), SchedulerError>>,
 {
-    tracing::info!(task = name, interval_secs = interval.as_secs(), "scheduled task registered");
+    tracing::info!(
+        task = name,
+        interval_secs = interval.as_secs(),
+        "scheduled task registered"
+    );
 
     loop {
         tokio::select! {
@@ -293,11 +297,17 @@ pub async fn run_tier_management(pool: &PgPool) -> Result<(), SchedulerError> {
 
     // --- Demotions: superseded facts ---------------------------------------
     let demoted_superseded = demote_superseded_facts(pool).await?;
-    tracing::info!(demoted_superseded = demoted_superseded, "superseded facts demoted");
+    tracing::info!(
+        demoted_superseded = demoted_superseded,
+        "superseded facts demoted"
+    );
 
     // --- Demotions: budget overflow ----------------------------------------
     let demoted_overflow = demote_budget_overflow(pool).await?;
-    tracing::info!(demoted_overflow = demoted_overflow, "budget overflow items demoted");
+    tracing::info!(
+        demoted_overflow = demoted_overflow,
+        "budget overflow items demoted"
+    );
 
     Ok(())
 }
@@ -383,10 +393,7 @@ async fn query_hot_entities(
 }
 
 /// Query hot-tier facts for a namespace.
-async fn query_hot_facts(
-    pool: &PgPool,
-    namespace: &str,
-) -> Result<Vec<HotFact>, SchedulerError> {
+async fn query_hot_facts(pool: &PgPool, namespace: &str) -> Result<Vec<HotFact>, SchedulerError> {
     let rows = sqlx::query_as::<_, HotFact>(
         r#"
         SELECT f.id, f.subject_id, f.predicate, f.object_id
@@ -711,9 +718,8 @@ mod tests {
 
     #[test]
     fn scheduler_error_snapshot_displays_message() {
-        let err = SchedulerError::Snapshot(snapshots::SnapshotError::Sqlx(
-            sqlx::Error::RowNotFound,
-        ));
+        let err =
+            SchedulerError::Snapshot(snapshots::SnapshotError::Sqlx(sqlx::Error::RowNotFound));
         assert!(err.to_string().contains("snapshot error"));
     }
 

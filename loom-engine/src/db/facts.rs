@@ -50,12 +50,10 @@ pub struct NewFact {
 /// Insert a new fact with provenance tracking.
 ///
 /// Accepts a pool reference and a `NewFact` struct. The database assigns
-/// `id`, `valid_from`, and `created_at` via defaults. Returns the inserted
-/// `Fact` row.
-pub async fn insert_fact(
-    pool: &PgPool,
-    fact: &NewFact,
-) -> Result<Fact, FactError> {
+/// `id`, `valid_from`, and `created_at` via defaults. If an earlier retry
+/// already wrote the same namespace/triple/provenance row, returns that row
+/// instead of creating another current fact.
+pub async fn insert_fact(pool: &PgPool, fact: &NewFact) -> Result<Fact, FactError> {
     let row = sqlx::query_as::<_, Fact>(
         r#"
         INSERT INTO loom_facts (
@@ -63,6 +61,9 @@ pub async fn insert_fact(
             source_episodes, evidence_status, evidence_strength, properties
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (namespace, subject_id, predicate, object_id, source_episodes)
+        WHERE deleted_at IS NULL
+        DO UPDATE SET evidence_status = loom_facts.evidence_status
         RETURNING *
         "#,
     )
@@ -87,16 +88,11 @@ pub async fn insert_fact(
 /// Fetch a single fact by its UUID.
 ///
 /// Returns `None` if no fact with the given id exists.
-pub async fn get_fact_by_id(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<Option<Fact>, FactError> {
-    let row = sqlx::query_as::<_, Fact>(
-        "SELECT * FROM loom_facts WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_fact_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Fact>, FactError> {
+    let row = sqlx::query_as::<_, Fact>("SELECT * FROM loom_facts WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(row)
 }
@@ -258,10 +254,7 @@ pub async fn supersede_fact_at(
 ///
 /// The row remains in the database but is excluded from normal queries.
 /// Returns the updated `Fact` row.
-pub async fn soft_delete_fact(
-    pool: &PgPool,
-    id: Uuid,
-) -> Result<Fact, FactError> {
+pub async fn soft_delete_fact(pool: &PgPool, id: Uuid) -> Result<Fact, FactError> {
     let row = sqlx::query_as::<_, Fact>(
         r#"
         UPDATE loom_facts

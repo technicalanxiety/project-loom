@@ -188,6 +188,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Retry-safe ingestion idempotency and hydrated fact context
+
+- Migration 017 scopes source-event deduplication to
+  `(namespace, source, source_event_id)`. Replaying the same seed file,
+  vendor export, hook session, or webhook event into another namespace
+  now creates/uses the row in that namespace instead of returning a row
+  from the first namespace. This tightens ADR-003's hard namespace
+  isolation invariant.
+- Fact insertion is now retry-idempotent for exact
+  `(namespace, subject_id, predicate, object_id, source_episodes)` rows.
+  If an episode fails after inserting facts but before
+  `mark_episode_processed`, requeueing the episode reuses the existing
+  current fact rows instead of inserting duplicates.
+- Supersession resolution now skips retry-returned facts that are no
+  longer current, preventing a requeue from reversing an already-built
+  temporal chain. Entity source links and procedure observations also
+  ignore an episode that is already present in their provenance arrays.
+- Warm-tier fact candidates now carry hydrated `subject_name` and
+  `object_name` through retrieval and compilation. Structured XML and
+  compact JSON context packages emit useful entity names rather than
+  UUID subject/object values.
+- `llm::client::truncate` now truncates on UTF-8 character boundaries,
+  so non-ASCII provider error bodies cannot panic the engine while
+  building response previews.
+- ADR-003 and ADR-007 amended to document namespace-scoped idempotency
+  and retry-safe side effects. README, AGENTS.md, Claude Code client
+  docs, and rustdoc comments updated to match.
+
 #### Pipeline reliability: bounded embedding input + constrained extraction output (ADR 011)
 
 - `EMBED_CHAR_LIMIT` lowered from 30,000 → 8,000 in
@@ -503,8 +531,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Posts the engine's embedded seed corpus (10 documents from
   `loom-engine/seed/benchmark/`) into the `benchmark` namespace as
   `user_authored_seed` episodes. Idempotent — repeat calls match on
-  content hash or `(source, source_event_id)` and return
-  `{inserted: 0, duplicates: <total>}`.
+  namespace-scoped content hash or
+  `(namespace, source, source_event_id)` and return `{inserted: 0,
+  duplicates: <total>}`.
 - Seed corpus lives at `loom-engine/seed/benchmark/` (moved from the
   repo root so it sits inside the engine's Docker build context — the
   initial location used `include_str!` paths that walked outside the

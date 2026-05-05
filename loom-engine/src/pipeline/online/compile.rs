@@ -28,9 +28,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::pipeline::online::rank::RankedCandidate;
-use crate::pipeline::online::retrieve::{
-    CandidatePayload, MemoryType, RetrievalCandidate,
-};
+use crate::pipeline::online::retrieve::{CandidatePayload, MemoryType, RetrievalCandidate};
 use crate::types::classification::TaskClass;
 use crate::types::compilation::{CompiledPackage, OutputFormat};
 use crate::types::ingestion::IngestionMode;
@@ -487,9 +485,9 @@ pub fn format_structured(
         match &rc.candidate.payload {
             CandidatePayload::Fact(f) => {
                 facts.push(format_structured_fact(
-                    &f.subject_id.to_string(),
+                    &f.subject_name,
                     &f.predicate,
-                    &f.object_id.to_string(),
+                    &f.object_name,
                     &f.evidence_status,
                     None,
                     &format_source_episodes(&f.source_episodes),
@@ -529,9 +527,8 @@ pub fn format_structured(
     }
 
     // Estimate token count for the root tag.
-    let estimated_tokens = estimate_structured_tokens(
-        &identity, &project, &facts, &episodes, &patterns,
-    );
+    let estimated_tokens =
+        estimate_structured_tokens(&identity, &project, &facts, &episodes, &patterns);
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -545,7 +542,10 @@ pub fn format_structured(
     if identity.is_empty() {
         identity = format!("{namespace} memory context");
     }
-    out.push_str(&format!("  <identity>{}</identity>\n", xml_escape(&identity)));
+    out.push_str(&format!(
+        "  <identity>{}</identity>\n",
+        xml_escape(&identity)
+    ));
 
     if !project.is_empty() {
         out.push_str(&format!("  <project>{}</project>\n", xml_escape(&project)));
@@ -646,11 +646,7 @@ fn format_structured_episode(
 }
 
 /// Format a single pattern as an XML self-closing tag.
-fn format_structured_pattern(
-    pattern: &str,
-    confidence: f64,
-    observations: i32,
-) -> String {
+fn format_structured_pattern(pattern: &str, confidence: f64, observations: i32) -> String {
     format!(
         "<pattern confidence=\"{:.2}\" observations=\"{}\">{}</pattern>",
         confidence,
@@ -745,9 +741,7 @@ pub fn format_compact(
                 if !identity.is_empty() {
                     identity.push_str(", ");
                 }
-                identity.push_str(
-                    e.summary.as_deref().unwrap_or(&e.name),
-                );
+                identity.push_str(e.summary.as_deref().unwrap_or(&e.name));
             }
             HotTierPayload::Procedure(p) => {
                 patterns.push(serde_json::json!({
@@ -768,9 +762,9 @@ pub fn format_compact(
         match &rc.candidate.payload {
             CandidatePayload::Fact(f) => {
                 let mut obj = serde_json::json!({
-                    "s": f.subject_id.to_string(),
+                    "s": f.subject_name,
                     "p": f.predicate,
-                    "o": f.object_id.to_string(),
+                    "o": f.object_name,
                     "e": f.evidence_status,
                     "t": "",
                 });
@@ -899,8 +893,8 @@ mod tests {
     use super::*;
     use crate::pipeline::online::rank::RankedCandidate;
     use crate::pipeline::online::retrieve::{
-        CandidatePayload, EpisodeCandidate, FactCandidate,
-        MemoryType, ProcedureCandidate, RetrievalCandidate, RetrievalProfile,
+        CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType, ProcedureCandidate,
+        RetrievalCandidate, RetrievalProfile,
     };
     use crate::types::compilation::RankingScore;
     use chrono::Utc;
@@ -957,8 +951,10 @@ mod tests {
             memory_type: MemoryType::Semantic,
             payload: CandidatePayload::Fact(FactCandidate {
                 subject_id: Uuid::new_v4(),
+                subject_name: "Rust".to_string(),
                 predicate: "uses".to_string(),
                 object_id: Uuid::new_v4(),
+                object_name: "PostgreSQL".to_string(),
                 evidence_status: "extracted".to_string(),
                 source_episodes: vec![Uuid::new_v4()],
                 namespace: "default".to_string(),
@@ -1080,10 +1076,7 @@ mod tests {
             pkg.contains("task=\"architecture\""),
             "should contain task attribute"
         );
-        assert!(
-            pkg.contains("tokens=\""),
-            "should contain tokens attribute"
-        );
+        assert!(pkg.contains("tokens=\""), "should contain tokens attribute");
     }
 
     #[test]
@@ -1092,10 +1085,7 @@ mod tests {
         let result = compile_package(input);
         let pkg = &result.package.context_package;
 
-        assert!(
-            pkg.contains("<identity>"),
-            "should contain <identity> tag"
-        );
+        assert!(pkg.contains("<identity>"), "should contain <identity> tag");
         assert!(
             pkg.contains("</identity>"),
             "should contain </identity> tag"
@@ -1116,10 +1106,7 @@ mod tests {
             pkg.contains("</knowledge>"),
             "should contain </knowledge> tag"
         );
-        assert!(
-            pkg.contains("<fact "),
-            "should contain <fact> elements"
-        );
+        assert!(pkg.contains("<fact "), "should contain <fact> elements");
     }
 
     #[test]
@@ -1129,10 +1116,26 @@ mod tests {
         let pkg = &result.package.context_package;
 
         assert!(pkg.contains("subject=\""), "fact should have subject attr");
-        assert!(pkg.contains("predicate=\""), "fact should have predicate attr");
+        assert!(
+            pkg.contains("predicate=\""),
+            "fact should have predicate attr"
+        );
         assert!(pkg.contains("object=\""), "fact should have object attr");
-        assert!(pkg.contains("evidence=\""), "fact should have evidence attr");
+        assert!(
+            pkg.contains("evidence=\""),
+            "fact should have evidence attr"
+        );
         assert!(pkg.contains("source=\""), "fact should have source attr");
+    }
+
+    #[test]
+    fn structured_format_warm_fact_uses_entity_names() {
+        let input = sample_input();
+        let result = compile_package(input);
+        let pkg = &result.package.context_package;
+
+        assert!(pkg.contains("subject=\"Rust\""));
+        assert!(pkg.contains("object=\"PostgreSQL\""));
     }
 
     #[test]
@@ -1141,10 +1144,7 @@ mod tests {
         let result = compile_package(input);
         let pkg = &result.package.context_package;
 
-        assert!(
-            pkg.contains("<episodes>"),
-            "should contain <episodes> tag"
-        );
+        assert!(pkg.contains("<episodes>"), "should contain <episodes> tag");
         assert!(
             pkg.contains("<episode "),
             "should contain <episode> elements"
@@ -1168,10 +1168,7 @@ mod tests {
         let result = compile_package(input);
         let pkg = &result.package.context_package;
 
-        assert!(
-            pkg.contains("<patterns>"),
-            "should contain <patterns> tag"
-        );
+        assert!(pkg.contains("<patterns>"), "should contain <patterns> tag");
         assert!(
             pkg.contains("<pattern "),
             "should contain <pattern> elements"
@@ -1232,10 +1229,16 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(pkg).unwrap();
         assert!(parsed.get("ns").is_some(), "should have 'ns' field");
         assert!(parsed.get("task").is_some(), "should have 'task' field");
-        assert!(parsed.get("identity").is_some(), "should have 'identity' field");
+        assert!(
+            parsed.get("identity").is_some(),
+            "should have 'identity' field"
+        );
         assert!(parsed.get("facts").is_some(), "should have 'facts' field");
         assert!(parsed.get("recent").is_some(), "should have 'recent' field");
-        assert!(parsed.get("patterns").is_some(), "should have 'patterns' field");
+        assert!(
+            parsed.get("patterns").is_some(),
+            "should have 'patterns' field"
+        );
     }
 
     #[test]
@@ -1255,6 +1258,21 @@ mod tests {
         assert!(fact.get("o").is_some(), "fact should have 'o' field");
         assert!(fact.get("e").is_some(), "fact should have 'e' field");
         assert!(fact.get("t").is_some(), "fact should have 't' field");
+    }
+
+    #[test]
+    fn compact_format_warm_fact_uses_entity_names() {
+        let mut input = sample_input();
+        input.format = OutputFormat::Compact;
+        let result = compile_package(input);
+        let pkg = &result.package.context_package;
+
+        let parsed: serde_json::Value = serde_json::from_str(pkg).unwrap();
+        let facts = parsed["facts"].as_array().unwrap();
+        assert!(facts.iter().any(|fact| {
+            fact.get("s").and_then(|v| v.as_str()) == Some("Rust")
+                && fact.get("o").and_then(|v| v.as_str()) == Some("PostgreSQL")
+        }));
     }
 
     #[test]

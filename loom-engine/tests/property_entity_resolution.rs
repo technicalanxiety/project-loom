@@ -46,7 +46,12 @@ fn namespace() -> impl Strategy<Value = String> {
 }
 
 /// Helper to build an `EntityWithScore` for testing.
-fn make_candidate(name: &str, entity_type: &str, namespace: &str, similarity: f64) -> EntityWithScore {
+fn make_candidate(
+    name: &str,
+    entity_type: &str,
+    namespace: &str,
+    similarity: f64,
+) -> EntityWithScore {
     EntityWithScore {
         id: Uuid::new_v4(),
         name: name.to_string(),

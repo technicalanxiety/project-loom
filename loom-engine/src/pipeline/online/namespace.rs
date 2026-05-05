@@ -96,10 +96,7 @@ pub async fn resolve_namespace(
             })
         }
         None => {
-            tracing::debug!(
-                namespace,
-                "no namespace config found, using defaults"
-            );
+            tracing::debug!(namespace, "no namespace config found, using defaults");
             Ok(NamespaceConfig {
                 namespace: namespace.to_string(),
                 ..Default::default()
@@ -137,12 +134,11 @@ pub async fn validate_fact_namespace(
     fact_namespace: &str,
 ) -> Result<(), NamespaceError> {
     // Check subject namespace.
-    let subject_ns: Option<(String,)> = sqlx::query_as(
-        "SELECT namespace FROM loom_entities WHERE id = $1",
-    )
-    .bind(subject_id)
-    .fetch_optional(pool)
-    .await?;
+    let subject_ns: Option<(String,)> =
+        sqlx::query_as("SELECT namespace FROM loom_entities WHERE id = $1")
+            .bind(subject_id)
+            .fetch_optional(pool)
+            .await?;
 
     if let Some((ns,)) = &subject_ns {
         if ns != fact_namespace {
@@ -154,12 +150,11 @@ pub async fn validate_fact_namespace(
     }
 
     // Check object namespace.
-    let object_ns: Option<(String,)> = sqlx::query_as(
-        "SELECT namespace FROM loom_entities WHERE id = $1",
-    )
-    .bind(object_id)
-    .fetch_optional(pool)
-    .await?;
+    let object_ns: Option<(String,)> =
+        sqlx::query_as("SELECT namespace FROM loom_entities WHERE id = $1")
+            .bind(object_id)
+            .fetch_optional(pool)
+            .await?;
 
     if let Some((ns,)) = &object_ns {
         if ns != fact_namespace {
@@ -243,10 +238,7 @@ mod tests {
     fn claude_code_namespace_from_directory() {
         // Simulate extracting namespace from a working directory path.
         let working_dir = "/home/user/projects/sentinel";
-        let namespace = working_dir
-            .rsplit('/')
-            .next()
-            .unwrap_or("default");
+        let namespace = working_dir.rsplit('/').next().unwrap_or("default");
         assert_eq!(namespace, "sentinel");
     }
 
@@ -256,9 +248,7 @@ mod tests {
         let manual_override = Some("custom-namespace".to_string());
         let working_dir_ns = "sentinel";
 
-        let resolved = manual_override
-            .as_deref()
-            .unwrap_or(working_dir_ns);
+        let resolved = manual_override.as_deref().unwrap_or(working_dir_ns);
         assert_eq!(resolved, "custom-namespace");
     }
 
@@ -267,9 +257,7 @@ mod tests {
         let manual_override: Option<String> = None;
         let working_dir_ns = "sentinel";
 
-        let resolved = manual_override
-            .as_deref()
-            .unwrap_or(working_dir_ns);
+        let resolved = manual_override.as_deref().unwrap_or(working_dir_ns);
         assert_eq!(resolved, "sentinel");
     }
 
@@ -298,10 +286,7 @@ mod tests {
         ];
 
         let query_ns = "project-a";
-        let filtered: Vec<_> = records
-            .iter()
-            .filter(|(ns, _)| *ns == query_ns)
-            .collect();
+        let filtered: Vec<_> = records.iter().filter(|(ns, _)| *ns == query_ns).collect();
 
         assert_eq!(filtered.len(), 2);
         assert!(filtered.iter().all(|(ns, _)| *ns == "project-a"));
@@ -309,16 +294,10 @@ mod tests {
 
     #[test]
     fn namespace_filter_returns_empty_for_unknown_namespace() {
-        let records = vec![
-            ("project-a", "entity-1"),
-            ("project-b", "entity-2"),
-        ];
+        let records = vec![("project-a", "entity-1"), ("project-b", "entity-2")];
 
         let query_ns = "nonexistent";
-        let filtered: Vec<_> = records
-            .iter()
-            .filter(|(ns, _)| *ns == query_ns)
-            .collect();
+        let filtered: Vec<_> = records.iter().filter(|(ns, _)| *ns == query_ns).collect();
 
         assert!(filtered.is_empty());
     }

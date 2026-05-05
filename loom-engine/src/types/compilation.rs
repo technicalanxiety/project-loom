@@ -57,9 +57,6 @@ pub struct RankingScore {
 impl RankingScore {
     /// Compute the weighted composite score.
     pub fn composite(&self) -> f64 {
-        self.relevance * 0.40
-            + self.recency * 0.25
-            + self.stability * 0.20
-            + self.provenance * 0.15
+        self.relevance * 0.40 + self.recency * 0.25 + self.stability * 0.20 + self.provenance * 0.15
     }
 }

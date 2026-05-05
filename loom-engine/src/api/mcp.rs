@@ -33,7 +33,6 @@ use crate::db::facts;
 use crate::db::pool::DbPools;
 use crate::llm::client::LlmClient;
 use crate::llm::embeddings;
-use crate::telemetry::SharedTelemetry;
 use crate::pipeline::online::{
     classify::{self, ClassifyStageOutput},
     compile::{self, CompilationInput, HotTierItem},
@@ -41,6 +40,7 @@ use crate::pipeline::online::{
     retrieve::{self, RetrievalResult},
     weight,
 };
+use crate::telemetry::SharedTelemetry;
 use crate::types::classification::TaskClass;
 use crate::types::compilation::OutputFormat;
 use crate::types::ingestion::IngestionMode;
@@ -130,7 +130,7 @@ pub fn compute_content_hash(content: &str) -> String {
 /// # Idempotency
 ///
 /// Duplicate detection uses two checks in order:
-/// 1. `(source, source_event_id)` unique constraint — catches re-deliveries
+/// 1. `(namespace, source, source_event_id)` unique constraint — catches re-deliveries
 ///    from the same source system.
 /// 2. `content_hash` — catches identical content submitted under different
 ///    event IDs.
@@ -158,7 +158,9 @@ pub async fn handle_loom_learn(
         return Err(McpError::InvalidRequest("source must not be empty".into()));
     }
     if req.namespace.trim().is_empty() {
-        return Err(McpError::InvalidRequest("namespace must not be empty".into()));
+        return Err(McpError::InvalidRequest(
+            "namespace must not be empty".into(),
+        ));
     }
 
     let content_hash = compute_content_hash(&req.content);
@@ -186,7 +188,7 @@ pub async fn handle_loom_learn(
         }));
     }
 
-    // Insert episode (insert_episode handles (source, source_event_id) dedup).
+    // Insert episode (insert_episode handles namespace-scoped source_event_id dedup).
     let new_ep = NewEpisode {
         source: req.source.clone(),
         source_id: None,
@@ -207,7 +209,7 @@ pub async fn handle_loom_learn(
         .map_err(|e| McpError::Database(e.to_string()))?;
 
     // Determine status: if insert_episode returned an existing row (idempotent
-    // on source+source_event_id), the episode was already ingested.
+    // on namespace+source+source_event_id), the episode was already ingested.
     let status = if episode.processed.unwrap_or(false) {
         "duplicate"
     } else {
@@ -255,7 +257,9 @@ pub async fn handle_loom_think(
         return Err(McpError::InvalidRequest("query must not be empty".into()));
     }
     if req.namespace.trim().is_empty() {
-        return Err(McpError::InvalidRequest("namespace must not be empty".into()));
+        return Err(McpError::InvalidRequest(
+            "namespace must not be empty".into(),
+        ));
     }
 
     let target_model = req
@@ -275,29 +279,30 @@ pub async fn handle_loom_think(
     // -----------------------------------------------------------------------
     let classify_start = Instant::now();
 
-    let classify_output: ClassifyStageOutput = if let Some(ref override_str) = req.task_class_override {
-        match TaskClass::from_str(override_str) {
-            Ok(tc) => classify::apply_override(tc),
-            Err(_) => {
-                return Err(McpError::InvalidRequest(format!(
-                    "unknown task_class_override: {override_str}"
-                )));
+    let classify_output: ClassifyStageOutput =
+        if let Some(ref override_str) = req.task_class_override {
+            match TaskClass::from_str(override_str) {
+                Ok(tc) => classify::apply_override(tc),
+                Err(_) => {
+                    return Err(McpError::InvalidRequest(format!(
+                        "unknown task_class_override: {override_str}"
+                    )));
+                }
             }
-        }
-    } else {
-        match classify::classify_query(&state.llm_client, &state.config.llm, &req.query).await {
-            Ok(output) => output,
-            Err(e) => {
-                // Classification failure: default to TaskClass::Chat.
-                tracing::warn!(
-                    error = %e,
-                    query = %req.query,
-                    "classification failed, defaulting to TaskClass::Chat"
-                );
-                classify::apply_override(TaskClass::Chat)
+        } else {
+            match classify::classify_query(&state.llm_client, &state.config.llm, &req.query).await {
+                Ok(output) => output,
+                Err(e) => {
+                    // Classification failure: default to TaskClass::Chat.
+                    tracing::warn!(
+                        error = %e,
+                        query = %req.query,
+                        "classification failed, defaulting to TaskClass::Chat"
+                    );
+                    classify::apply_override(TaskClass::Chat)
+                }
             }
-        }
-    };
+        };
 
     let latency_classify_ms = classify_start.elapsed().as_millis() as i32;
     let task_class = &classify_output.result.primary_class;
@@ -312,13 +317,10 @@ pub async fn handle_loom_think(
     // -----------------------------------------------------------------------
     // Stage 3: Generate query embedding
     // -----------------------------------------------------------------------
-    let query_embedding_vec = embeddings::generate_embedding(
-        &state.llm_client,
-        &state.config.llm,
-        &req.query,
-    )
-    .await
-    .map_err(|e| McpError::Embedding(e.to_string()))?;
+    let query_embedding_vec =
+        embeddings::generate_embedding(&state.llm_client, &state.config.llm, &req.query)
+            .await
+            .map_err(|e| McpError::Embedding(e.to_string()))?;
 
     let query_embedding = pgvector::Vector::from(query_embedding_vec);
 
@@ -474,17 +476,15 @@ pub async fn handle_loom_recall(
         ));
     }
     if req.namespace.trim().is_empty() {
-        return Err(McpError::InvalidRequest("namespace must not be empty".into()));
+        return Err(McpError::InvalidRequest(
+            "namespace must not be empty".into(),
+        ));
     }
 
     // Resolve entity IDs from names.
-    let entity_ids = resolve_entity_ids(
-        &state.pools.online,
-        &req.entity_names,
-        &req.namespace,
-    )
-    .await
-    .map_err(|e| McpError::Database(e.to_string()))?;
+    let entity_ids = resolve_entity_ids(&state.pools.online, &req.entity_names, &req.namespace)
+        .await
+        .map_err(|e| McpError::Database(e.to_string()))?;
 
     if entity_ids.is_empty() {
         tracing::debug!(
@@ -664,7 +664,9 @@ async fn fetch_warm_tier_budget(
     .fetch_optional(pool)
     .await?;
 
-    Ok(budget.map(|b| b as usize).unwrap_or(compile::DEFAULT_WARM_TIER_BUDGET))
+    Ok(budget
+        .map(|b| b as usize)
+        .unwrap_or(compile::DEFAULT_WARM_TIER_BUDGET))
 }
 
 /// Fire-and-forget update of access counts for selected candidates.

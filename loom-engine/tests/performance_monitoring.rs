@@ -9,8 +9,7 @@ use std::time::{Duration, Instant};
 
 use loom_engine::pipeline::online::classify;
 use loom_engine::pipeline::online::compile::{
-    self, CompilationInput, CompilationResult, HotFact, HotTierItem, HotTierPayload,
-    SelectedItem,
+    self, CompilationInput, CompilationResult, HotFact, HotTierItem, HotTierPayload, SelectedItem,
 };
 use loom_engine::pipeline::online::rank::{self, RankedCandidate};
 use loom_engine::pipeline::online::retrieve::{
@@ -134,7 +133,9 @@ async fn latency_measurement_captures_real_elapsed_time() {
 /// individual stage latencies sum to approximately the total latency.
 #[test]
 fn stage_latencies_sum_to_total() {
-    let candidates = (0..10).map(|i| make_fact_candidate(0.9 - i as f64 * 0.05)).collect();
+    let candidates = (0..10)
+        .map(|i| make_fact_candidate(0.9 - i as f64 * 0.05))
+        .collect();
     let task_class = TaskClass::Architecture;
 
     let total_start = Instant::now();
@@ -218,11 +219,11 @@ fn audit_entry_captures_latency_breakdown() {
         Some(0.95),
         None,
         &["fact_lookup".to_string()],
-        Some(150),  // total
-        Some(20),   // classify
-        Some(80),   // retrieve
-        Some(30),   // rank
-        Some(20),   // compile
+        Some(150), // total
+        Some(20),  // classify
+        Some(80),  // retrieve
+        Some(30),  // rank
+        Some(20),  // compile
     );
 
     assert_eq!(audit.latency_total_ms, Some(150));
@@ -368,10 +369,7 @@ fn percentile_p50_on_known_data() {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let p50 = compute_percentile(&values, 50.0);
-    assert!(
-        (p50 - 50.0).abs() < 1.5,
-        "p50 should be ~50, got {p50}"
-    );
+    assert!((p50 - 50.0).abs() < 1.5, "p50 should be ~50, got {p50}");
 }
 
 /// **Validates: Requirements 35.7**
@@ -383,10 +381,7 @@ fn percentile_p95_on_known_data() {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let p95 = compute_percentile(&values, 95.0);
-    assert!(
-        (p95 - 95.0).abs() < 1.5,
-        "p95 should be ~95, got {p95}"
-    );
+    assert!((p95 - 95.0).abs() < 1.5, "p95 should be ~95, got {p95}");
 }
 
 /// **Validates: Requirements 35.7**
@@ -398,10 +393,7 @@ fn percentile_p99_on_known_data() {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let p99 = compute_percentile(&values, 99.0);
-    assert!(
-        (p99 - 99.0).abs() < 1.5,
-        "p99 should be ~99, got {p99}"
-    );
+    assert!((p99 - 99.0).abs() < 1.5, "p99 should be ~99, got {p99}");
 }
 
 /// **Validates: Requirements 35.7**
@@ -429,9 +421,7 @@ fn percentile_empty_dataset() {
 /// Test that duration-based percentile works correctly.
 #[test]
 fn duration_percentile_correctness() {
-    let mut durations: Vec<Duration> = (1..=100)
-        .map(|i| Duration::from_millis(i))
-        .collect();
+    let mut durations: Vec<Duration> = (1..=100).map(|i| Duration::from_millis(i)).collect();
     durations.sort();
 
     let p50 = compute_duration_percentile(&durations, 50.0);

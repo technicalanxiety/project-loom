@@ -224,7 +224,7 @@ schema enforcement is incomplete.
   but does not eliminate it. Operators on stale Ollama should upgrade.
 - A token-aware embedding truncation (using a real tokenizer) is the
   correct long-term refinement and is filed as follow-up work. The
-  16,000-char cap is the immediate fix; the tokenizer-based path
+  8,000-char cap is the immediate fix; the tokenizer-based path
   reclaims the prose-heavy completeness loss.
 
 ## Follow-up

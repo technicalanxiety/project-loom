@@ -76,7 +76,10 @@ pub async fn generate_embedding(
 
     validate_dimension(&embedding)?;
 
-    tracing::debug!(dimensions = embedding.len(), "embedding generated successfully");
+    tracing::debug!(
+        dimensions = embedding.len(),
+        "embedding generated successfully"
+    );
     Ok(embedding)
 }
 
@@ -142,7 +145,10 @@ pub async fn generate_episode_embedding(
             "episode content exceeds embedding context window — truncating"
         );
     }
-    tracing::debug!(content_len = truncated.len(), "generating episode embedding");
+    tracing::debug!(
+        content_len = truncated.len(),
+        "generating episode embedding"
+    );
     generate_embedding(client, config, truncated).await
 }
 
@@ -225,9 +231,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
@@ -245,9 +249,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(512)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(512)))
             .expect(1)
             .mount(&server)
             .await;
@@ -293,9 +295,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
@@ -317,9 +317,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
@@ -410,7 +408,9 @@ mod tests {
     #[test]
     fn truncate_multibyte_unicode_stays_on_char_boundary() {
         // Each '字' is 3 UTF-8 bytes. Build a string slightly over the limit.
-        let text: String = std::iter::repeat('字').take(EMBED_CHAR_LIMIT + 10).collect();
+        let text: String = std::iter::repeat('字')
+            .take(EMBED_CHAR_LIMIT + 10)
+            .collect();
         let result = truncate_for_embedding(&text);
         assert_eq!(result.chars().count(), EMBED_CHAR_LIMIT);
         // Valid UTF-8 — chars() must not panic.
@@ -425,9 +425,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
@@ -445,9 +443,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
@@ -467,9 +463,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
@@ -490,17 +484,14 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;
 
         let (client, config) = test_config(&server.uri());
         let result =
-            generate_embedding(&client, &config, "Hello 🌍🚀 日本語テスト Ñoño café")
-                .await;
+            generate_embedding(&client, &config, "Hello 🌍🚀 日本語テスト Ñoño café").await;
 
         let vec = result.expect("should succeed with unicode/emoji text");
         assert_eq!(vec.len(), 768);
@@ -512,9 +503,7 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(embedding_response(768)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(embedding_response(768)))
             .expect(1)
             .mount(&server)
             .await;

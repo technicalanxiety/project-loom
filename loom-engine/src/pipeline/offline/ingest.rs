@@ -2,7 +2,7 @@
 //!
 //! Provides the [`ingest_episode`] function that:
 //! - Computes a SHA-256 content hash for deduplication.
-//! - Detects duplicates by content hash and `(source, source_event_id)`.
+//! - Detects duplicates by content hash and `(namespace, source, source_event_id)`.
 //! - Validates input data via serde deserialization boundaries.
 //! - Queues failed episodes for retry by leaving `processed = false`.
 //! - Logs all errors via tracing with span context.
@@ -125,7 +125,7 @@ pub fn validate_episode_input(
 ///
 /// 1. Content-hash + namespace check — catches identical content re-submitted
 ///    under different event IDs.
-/// 2. `(source, source_event_id)` unique constraint — handled by
+/// 2. `(namespace, source, source_event_id)` unique constraint — handled by
 ///    [`episodes::insert_episode`].
 /// 3. Database constraint violations — treated as duplicates, returning the
 ///    existing episode ID.
@@ -191,7 +191,7 @@ pub async fn ingest_episode(
         });
     }
 
-    // Step 3: Insert episode (handles source+source_event_id dedup).
+    // Step 3: Insert episode (handles namespace+source+source_event_id dedup).
     let new_ep = NewEpisode {
         source: source.to_string(),
         source_id: None,
@@ -240,9 +240,10 @@ pub async fn ingest_episode(
                     "constraint violation treated as duplicate"
                 );
 
-                // Try to find the existing episode by source+source_event_id.
-                if let Some(ref event_id) = source_event_id {
-                    if let Ok(Some(existing)) = find_by_source_event(pool, source, event_id).await
+                // Try to find the existing episode by namespace+source+source_event_id.
+                if let Some(event_id) = source_event_id {
+                    if let Ok(Some(existing)) =
+                        find_by_source_event(pool, namespace, source, event_id).await
                     {
                         return Ok(IngestResult {
                             episode_id: existing.id,
@@ -266,15 +267,24 @@ pub async fn ingest_episode(
     }
 }
 
-/// Find an episode by source and source_event_id.
+/// Find an episode by namespace, source, and source_event_id.
 async fn find_by_source_event(
     pool: &PgPool,
+    namespace: &str,
     source: &str,
     source_event_id: &str,
 ) -> Result<Option<Episode>, sqlx::Error> {
     sqlx::query_as::<_, Episode>(
-        "SELECT * FROM loom_episodes WHERE source = $1 AND source_event_id = $2 LIMIT 1",
+        r#"
+        SELECT *
+        FROM loom_episodes
+        WHERE namespace = $1
+          AND source = $2
+          AND source_event_id = $3
+        LIMIT 1
+        "#,
     )
+    .bind(namespace)
     .bind(source)
     .bind(source_event_id)
     .fetch_optional(pool)

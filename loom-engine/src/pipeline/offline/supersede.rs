@@ -73,12 +73,28 @@ pub async fn resolve_supersessions(
     pool: &PgPool,
     new_fact: &NewFactDetails,
 ) -> Result<usize, SupersedeError> {
+    let Some(current_new_fact) = facts::get_fact_by_id(pool, new_fact.fact_id).await? else {
+        tracing::debug!(
+            fact_id = %new_fact.fact_id,
+            "skipping supersession for missing fact"
+        );
+        return Ok(0);
+    };
+
+    if current_new_fact.valid_until.is_some() || current_new_fact.deleted_at.is_some() {
+        tracing::debug!(
+            fact_id = %new_fact.fact_id,
+            "skipping supersession for non-current fact"
+        );
+        return Ok(0);
+    }
+
     // Query current facts with same (subject_id, predicate, namespace).
     let existing = facts::query_facts_by_subject_and_predicate(
         pool,
-        new_fact.subject_id,
-        &new_fact.predicate,
-        &new_fact.namespace,
+        current_new_fact.subject_id,
+        &current_new_fact.predicate,
+        &current_new_fact.namespace,
     )
     .await?;
 
@@ -91,7 +107,7 @@ pub async fn resolve_supersessions(
         }
 
         // Only supersede facts with a different object_id.
-        if old_fact.object_id == new_fact.object_id {
+        if old_fact.object_id == current_new_fact.object_id {
             continue;
         }
 
@@ -99,15 +115,15 @@ pub async fn resolve_supersessions(
             old_fact_id = %old_fact.id,
             old_object_id = %old_fact.object_id,
             new_fact_id = %new_fact.fact_id,
-            new_object_id = %new_fact.object_id,
+            new_object_id = %current_new_fact.object_id,
             "superseding contradicting fact"
         );
 
         facts::supersede_fact_at(
             pool,
             old_fact.id,
-            new_fact.fact_id,
-            new_fact.valid_from,
+            current_new_fact.id,
+            current_new_fact.valid_from,
         )
         .await?;
 
@@ -364,7 +380,10 @@ mod tests {
         };
 
         let should_supersede = old_fact.object_id != new_details.object_id;
-        assert!(!should_supersede, "same object should not trigger supersession");
+        assert!(
+            !should_supersede,
+            "same object should not trigger supersession"
+        );
     }
 
     #[test]
@@ -455,8 +474,8 @@ mod tests {
             valid_from: Utc::now(),
         };
 
-        let should_supersede = old_fact.object_id != new_details.object_id
-            && old_fact.valid_until.is_none(); // this is false
+        let should_supersede =
+            old_fact.object_id != new_details.object_id && old_fact.valid_until.is_none(); // this is false
 
         assert!(
             !should_supersede,

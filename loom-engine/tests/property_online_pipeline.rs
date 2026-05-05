@@ -27,23 +27,19 @@ use loom_engine::types::classification::{ClassificationResult, TaskClass};
 // ---------------------------------------------------------------------------
 
 /// The five valid task classes.
-const VALID_TASK_CLASSES: &[&str] = &[
-    "debug",
-    "architecture",
-    "compliance",
-    "writing",
-    "chat",
-];
+const VALID_TASK_CLASSES: &[&str] = &["debug", "architecture", "compliance", "writing", "chat"];
 
 /// Proptest strategy for selecting a valid TaskClass.
 fn task_class() -> impl Strategy<Value = TaskClass> {
-    prop::sample::select(&[
-        TaskClass::Debug,
-        TaskClass::Architecture,
-        TaskClass::Compliance,
-        TaskClass::Writing,
-        TaskClass::Chat,
-    ][..])
+    prop::sample::select(
+        &[
+            TaskClass::Debug,
+            TaskClass::Architecture,
+            TaskClass::Compliance,
+            TaskClass::Writing,
+            TaskClass::Chat,
+        ][..],
+    )
     .prop_map(|c| c.clone())
 }
 
@@ -567,18 +563,20 @@ mod hard_exclusion_by_weight {
     use chrono::Utc;
     use loom_engine::pipeline::online::rank::rank_candidates;
     use loom_engine::pipeline::online::retrieve::{
-        CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType,
-        ProcedureCandidate, RetrievalCandidate, RetrievalProfile,
+        CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType, ProcedureCandidate,
+        RetrievalCandidate, RetrievalProfile,
     };
     use loom_engine::pipeline::online::weight::{apply_weights, weight_for_memory_type};
 
     /// Strategy for generating a memory type.
     fn memory_type_strategy() -> impl Strategy<Value = MemoryType> {
-        prop::sample::select(&[
-            MemoryType::Episodic,
-            MemoryType::Semantic,
-            MemoryType::Procedural,
-        ][..])
+        prop::sample::select(
+            &[
+                MemoryType::Episodic,
+                MemoryType::Semantic,
+                MemoryType::Procedural,
+            ][..],
+        )
         .prop_map(|m| m.clone())
     }
 
@@ -754,12 +752,11 @@ mod hard_exclusion_by_weight {
 mod four_dimension_weighted_ranking {
     use super::*;
     use loom_engine::pipeline::online::rank::{
-        compute_final_score, rank_candidates, PROVENANCE_WEIGHT, RECENCY_WEIGHT,
-        RELEVANCE_WEIGHT, STABILITY_WEIGHT,
+        compute_final_score, rank_candidates, PROVENANCE_WEIGHT, RECENCY_WEIGHT, RELEVANCE_WEIGHT,
+        STABILITY_WEIGHT,
     };
     use loom_engine::pipeline::online::retrieve::{
-        CandidatePayload, FactCandidate, MemoryType, RetrievalCandidate,
-        RetrievalProfile,
+        CandidatePayload, FactCandidate, MemoryType, RetrievalCandidate, RetrievalProfile,
     };
     use loom_engine::pipeline::online::weight::WeightedCandidate;
     use loom_engine::types::compilation::RankingScore;
@@ -1029,7 +1026,12 @@ mod hot_tier_constraints {
 
     /// Strategy for generating a simulated hot tier item.
     fn sim_hot_item() -> impl Strategy<Value = SimHotItem> {
-        (uuid_strategy(), salience(), proptest::bool::ANY, proptest::bool::ANY)
+        (
+            uuid_strategy(),
+            salience(),
+            proptest::bool::ANY,
+            proptest::bool::ANY,
+        )
             .prop_map(|(id, salience, pinned, superseded)| SimHotItem {
                 id,
                 salience,
@@ -1307,13 +1309,12 @@ mod hot_tier_constraints {
 mod candidate_deduplication {
     use super::*;
     use loom_engine::pipeline::online::compile::{
-        compile_package, CompilationInput, HotTierItem, HotTierPayload, HotFact,
+        compile_package, CompilationInput, HotFact, HotTierItem, HotTierPayload,
         DEFAULT_WARM_TIER_BUDGET,
     };
     use loom_engine::pipeline::online::rank::RankedCandidate;
     use loom_engine::pipeline::online::retrieve::{
-        CandidatePayload, FactCandidate, MemoryType, RetrievalCandidate,
-        RetrievalProfile,
+        CandidatePayload, FactCandidate, MemoryType, RetrievalCandidate, RetrievalProfile,
     };
     use loom_engine::types::classification::TaskClass;
     use loom_engine::types::compilation::{OutputFormat, RankingScore};
@@ -1462,8 +1463,8 @@ mod candidate_deduplication {
 mod hot_tier_injection {
     use super::*;
     use loom_engine::pipeline::online::compile::{
-        compile_package, CompilationInput, HotTierItem, HotTierPayload,
-        HotFact, HotEntity, HotProcedure, DEFAULT_WARM_TIER_BUDGET,
+        compile_package, CompilationInput, HotEntity, HotFact, HotProcedure, HotTierItem,
+        HotTierPayload, DEFAULT_WARM_TIER_BUDGET,
     };
     use loom_engine::pipeline::online::retrieve::MemoryType;
     use loom_engine::types::classification::TaskClass;
@@ -1493,11 +1494,8 @@ mod hot_tier_injection {
 
     /// Strategy for generating a hot tier entity.
     fn hot_entity_strategy() -> impl Strategy<Value = HotTierItem> {
-        (
-            any::<u128>().prop_map(Uuid::from_u128),
-            "[a-zA-Z]{3,15}",
-        )
-            .prop_map(|(id, name)| HotTierItem {
+        (any::<u128>().prop_map(Uuid::from_u128), "[a-zA-Z]{3,15}").prop_map(|(id, name)| {
+            HotTierItem {
                 id,
                 memory_type: MemoryType::Semantic,
                 payload: HotTierPayload::Entity(HotEntity {
@@ -1505,7 +1503,8 @@ mod hot_tier_injection {
                     entity_type: "project".to_string(),
                     summary: Some(format!("{name} project")),
                 }),
-            })
+            }
+        })
     }
 
     /// Strategy for generating a hot tier procedure.
@@ -1667,8 +1666,8 @@ mod output_format_correctness {
     };
     use loom_engine::pipeline::online::rank::RankedCandidate;
     use loom_engine::pipeline::online::retrieve::{
-        CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType,
-        ProcedureCandidate, RetrievalCandidate, RetrievalProfile,
+        CandidatePayload, EpisodeCandidate, FactCandidate, MemoryType, ProcedureCandidate,
+        RetrievalCandidate, RetrievalProfile,
     };
     use loom_engine::types::classification::TaskClass;
     use loom_engine::types::compilation::{OutputFormat, RankingScore};
