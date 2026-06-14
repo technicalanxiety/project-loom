@@ -272,6 +272,14 @@ async fn main() {
             post(dashboard::handle_cancel_benchmark),
         )
         .route(
+            "/dashboard/api/consolidation/health/{namespace}",
+            get(dashboard::handle_consolidation_health),
+        )
+        .route(
+            "/dashboard/api/consolidation/run/{namespace}",
+            post(dashboard::handle_run_consolidation),
+        )
+        .route(
             "/dashboard/api/stream/telemetry",
             get(dashboard::handle_telemetry_stream),
         )

@@ -2,6 +2,7 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
 import './design-system.css';
 import './App.css';
 import { BenchmarkPage } from './pages/BenchmarkPage';
+import { ConsolidationPage } from './pages/ConsolidationPage';
 import { CompilationDetailPage } from './pages/CompilationDetailPage';
 import { CompilationsPage } from './pages/CompilationsPage';
 import { ConflictsPage } from './pages/ConflictsPage';
@@ -40,6 +41,7 @@ function App() {
             <NavLink to="/compilations">Compilations</NavLink>
 
             <div className="nav-section">Operations</div>
+            <NavLink to="/consolidation">Consolidation</NavLink>
             <NavLink to="/conflicts">Conflicts</NavLink>
             <NavLink to="/predicates">Predicates</NavLink>
 
@@ -62,6 +64,7 @@ function App() {
             <Route path="/compilations/:id" element={<CompilationDetailPage />} />
             <Route path="/entities" element={<EntitiesPage />} />
             <Route path="/entities/:id" element={<EntityDetailPage />} />
+            <Route path="/consolidation" element={<ConsolidationPage />} />
             <Route path="/conflicts" element={<ConflictsPage />} />
             <Route path="/predicates" element={<PredicatesPage />} />
             <Route path="/predicates/packs/:pack" element={<PackDetailPage />} />

@@ -2550,6 +2550,122 @@ pub async fn handle_telemetry_stream(
 }
 
 // ---------------------------------------------------------------------------
+// Consolidation endpoints
+// ---------------------------------------------------------------------------
+
+/// Response for the consolidation health endpoint.
+#[derive(Debug, Serialize)]
+pub struct ConsolidationHealthResponse {
+    pub namespace: String,
+    pub latest_consolidation_run: Option<crate::types::consolidation::ConsolidationLog>,
+    pub latest_pruning_run: Option<crate::types::consolidation::ConsolidationLog>,
+    pub total_summaries: i64,
+    pub active_summaries: i64,
+    pub invalidated_summaries: i64,
+    pub recent_runs: Vec<crate::types::consolidation::ConsolidationLog>,
+}
+
+/// Get consolidation health metrics for a namespace.
+pub async fn handle_consolidation_health(
+    State(state): State<AppState>,
+    Path(namespace): Path<String>,
+) -> Result<Json<ConsolidationHealthResponse>, DashboardError> {
+    let pool = &state.pools.online;
+
+    let latest_consolidation = crate::db::consolidation::get_latest_consolidation_run(pool, &namespace)
+        .await
+        .map_err(|e| DashboardError::Database(e.to_string()))?;
+
+    let latest_pruning = sqlx::query_as::<_, crate::types::consolidation::ConsolidationLog>(
+        r#"
+        SELECT * FROM loom_consolidation_log
+        WHERE namespace = $1 AND run_type = 'pruning'
+        ORDER BY started_at DESC LIMIT 1
+        "#,
+    )
+    .bind(&namespace)
+    .fetch_optional(pool)
+    .await?;
+
+    let (total, active, invalidated) = sqlx::query_as::<_, (i64, i64, i64)>(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE deleted_at IS NULL) as total,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL AND invalidated_at IS NULL) as active,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL AND invalidated_at IS NOT NULL) as invalidated
+        FROM loom_summaries
+        WHERE namespace = $1
+        "#,
+    )
+    .bind(&namespace)
+    .fetch_one(pool)
+    .await?;
+
+    let recent_runs = sqlx::query_as::<_, crate::types::consolidation::ConsolidationLog>(
+        r#"
+        SELECT * FROM loom_consolidation_log
+        WHERE namespace = $1
+        ORDER BY started_at DESC
+        LIMIT 20
+        "#,
+    )
+    .bind(&namespace)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(Json(ConsolidationHealthResponse {
+        namespace,
+        latest_consolidation_run: latest_consolidation,
+        latest_pruning_run: latest_pruning,
+        total_summaries: total,
+        active_summaries: active,
+        invalidated_summaries: invalidated,
+        recent_runs,
+    }))
+}
+
+/// Trigger a manual consolidation + pruning run for a namespace.
+pub async fn handle_run_consolidation(
+    State(state): State<AppState>,
+    Path(namespace): Path<String>,
+) -> Result<Json<serde_json::Value>, DashboardError> {
+    let pools = state.pools.clone();
+    let llm_client = state.llm_client.clone();
+    let ns = namespace.clone();
+
+    tokio::spawn(async move {
+        let pool = &pools.offline;
+
+        match crate::worker::consolidator::run_consolidation_phase(pool, &llm_client, &ns, 5).await
+        {
+            Ok(log) => {
+                if let Err(e) = crate::db::consolidation::insert_consolidation_log(pool, &log).await
+                {
+                    tracing::warn!(namespace = %ns, error = %e, "failed to log consolidation");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(namespace = %ns, error = %e, "manual consolidation failed");
+            }
+        }
+
+        match crate::worker::consolidator::run_pruning_phase(pool, &ns, 90, 60, 30).await {
+            Ok(log) => {
+                if let Err(e) = crate::db::consolidation::insert_consolidation_log(pool, &log).await
+                {
+                    tracing::warn!(namespace = %ns, error = %e, "failed to log pruning");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(namespace = %ns, error = %e, "manual pruning failed");
+            }
+        }
+    });
+
+    Ok(Json(serde_json::json!({ "status": "started" })))
+}
+
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
