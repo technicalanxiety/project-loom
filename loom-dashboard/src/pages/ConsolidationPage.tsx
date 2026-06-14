@@ -54,7 +54,7 @@ export const ConsolidationPage: React.FC<{ namespace: string }> = ({ namespace }
   if (loading) {
     return (
       <>
-        <PageHeader namespace={namespace} />
+        <PageHeader />
         <div className="loading">Loading consolidation health…</div>
       </>
     );
@@ -63,7 +63,7 @@ export const ConsolidationPage: React.FC<{ namespace: string }> = ({ namespace }
   if (error) {
     return (
       <>
-        <PageHeader namespace={namespace} />
+        <PageHeader />
         <div className="error">Error: {error}</div>
       </>
     );
@@ -72,7 +72,7 @@ export const ConsolidationPage: React.FC<{ namespace: string }> = ({ namespace }
   if (!data) {
     return (
       <>
-        <PageHeader namespace={namespace} />
+        <PageHeader />
         <div className="empty-state">
           <h3>No consolidation data</h3>
           <p>The consolidation pipeline has not run yet for this namespace.</p>
@@ -179,7 +179,7 @@ function ConsolidationRunRow({ run }: { run: import('../types').ConsolidationRun
   );
 }
 
-function PageHeader({ namespace }: { namespace: string }) {
+function PageHeader() {
   return (
     <div className="page-header">
       <div className="page-header-titles">
