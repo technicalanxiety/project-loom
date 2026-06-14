@@ -95,11 +95,9 @@ impl DbPools {
             .idle_timeout(idle_timeout)
             .after_connect(move |conn, _meta| {
                 Box::pin(async move {
-                    // Set per-connection statement timeout to prevent runaway queries.
-                    // PostgreSQL SET doesn't accept bind parameters, but statement_timeout_ms
-                    // is controlled internally, not user input, so format!() is safe here.
+                    // SET doesn't accept bind parameters; value is internal, not user input.
                     let stmt = format!("SET statement_timeout = '{statement_timeout_ms}ms'");
-                    sqlx::query(&stmt).execute(&mut *conn).await?;
+                    sqlx::query(&sqlx::AssertSqlSafe(stmt)).execute(&mut *conn).await?;
                     Ok(())
                 })
             })
@@ -116,10 +114,9 @@ impl DbPools {
                     // Offline pool gets a longer statement timeout (3x) since
                     // extraction queries can be heavier.
                     let offline_timeout_ms = statement_timeout_ms * 3;
-                    // PostgreSQL SET doesn't accept bind parameters, but offline_timeout_ms
-                    // is controlled internally, not user input, so format!() is safe here.
+                    // SET doesn't accept bind parameters; value is internal, not user input.
                     let stmt = format!("SET statement_timeout = '{offline_timeout_ms}ms'");
-                    sqlx::query(&stmt).execute(&mut *conn).await?;
+                    sqlx::query(&sqlx::AssertSqlSafe(stmt)).execute(&mut *conn).await?;
                     Ok(())
                 })
             })
