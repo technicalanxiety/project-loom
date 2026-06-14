@@ -1211,12 +1211,62 @@ DEFAULT (no migration 016 needed).
   - Navigation entries under a new "Ingestion" section
   - _Requirements: 58_
 
-- [ ] 37. Codex CLI file watcher (deferred to weeks 9-10)
+- [x] 37. Memory consolidation and active forgetting pipeline (ADR-012)
+  - [x] 37.1 Database migrations for consolidation tables
+    - Migration 018: `loom_summaries` table with source_facts UUID array, synthesis provenance, invalidation tracking
+    - Migration 019: `loom_consolidation_log` table for run telemetry (type, status, duration, per-phase counters)
+    - Migration 020: `loom_namespace_config` columns for per-namespace consolidation settings (min_cluster, schedule, TTL knobs)
+    - Migration 020: `loom_procedures` columns for decay tracking (last_matched_at, decay_eligible_at)
+    - `loom_summary_state` table for embeddings and access tracking
+    - _Requirements: 60.1, 60.4, 60.9, 60.10_
+
+  - [x] 37.2 Consolidation worker (consolidation phase)
+    - `src/worker/consolidator.rs` — cluster identification, LLM synthesis, hallucination guard, summary upsert
+    - `prompts/consolidation.txt` — structured consolidation prompt with coverage map and conflict detection
+    - Cluster identification: entities with ≥ min_cluster_size stable facts older than 48h, capped at 20 per run
+    - Hallucination guard: cross-check every cited fact UUID against cluster source facts
+    - Summary embedding via nomic-embed-text for warm-tier retrieval
+    - _Requirements: 60.1, 60.2, 60.3, 60.4_
+
+  - [x] 37.3 Consolidation worker (pruning phase)
+    - Stale procedure soft-deletion (configurable TTL, default 90 days)
+    - Auto-resolution of unresolved conflicts past TTL (default 60 days)
+    - Soft-deletion of invalidated summaries past TTL (default 30 days)
+    - _Requirements: 60.6, 60.7, 60.8_
+
+  - [x] 37.4 Scheduler integration
+    - `daily_consolidation` job added to `src/worker/scheduler.rs` on 24-hour interval
+    - Iterates all configured namespaces, reads per-namespace settings from `loom_namespace_config`
+    - Runs consolidation phase then pruning phase per namespace
+    - _Requirements: 60.9, 60.10_
+
+  - [x] 37.5 Retrieval pipeline integration
+    - `CandidatePayload::Summary` variant in `src/pipeline/online/retrieve.rs`
+    - Summary candidates in warm-tier retrieval alongside facts, episodes, and graph candidates
+    - Token estimation, context formatting, and JSON response building for summaries in `compile.rs` and `rank.rs`
+    - _Requirements: 60.4, 60.5_
+
+  - [x] 37.6 Consolidation types and DB layer
+    - `src/types/summary.rs` — KnowledgeSummary, SummaryCandidate, SynthesisResponse, ConsolidationResult
+    - `src/types/consolidation.rs` — ConsolidationLog, ConsolidationStatus, ConsolidationRunType
+    - `src/db/consolidation.rs` — insert, query, update, and fail consolidation log entries
+    - `src/db/entities.rs` — insert_summary, update_summary_state, query helpers
+    - _Requirements: 60.4, 60.10_
+
+  - [x] 37.7 Dashboard consolidation page and API routes
+    - `GET /dashboard/api/consolidation/health/{namespace}` — summary counts, latest runs, recent history
+    - `POST /dashboard/api/consolidation/run/{namespace}` — manual consolidation trigger (spawns background task)
+    - `loom-dashboard/src/pages/ConsolidationPage.tsx` — KPI cards, activity table, namespace selector, run button
+    - Sidebar nav entry under Operations section, route at `/consolidation`
+    - Dashboard API client functions and TypeScript types
+    - _Requirements: 61.1, 61.2, 61.3, 61.4, 61.5, 61.6_
+
+- [ ] 38. Codex CLI file watcher (deferred to weeks 9-10)
   - Same pattern as `loom-capture.sh` but reads `~/.codex/sessions/`
     rollout files
   - _Requirements: 59 (secondary surface)_
 
-- [ ] 38. Remaining vendor parsers
+- [ ] 39. Remaining vendor parsers
   - `bootstrap/claude_ai_parser.py` — `claude_ai_export_v2` schema
   - `bootstrap/chatgpt_parser.py` — `chatgpt_export_v1` schema
   - `bootstrap/codex_cli_parser.py` — `codex_cli_rollout_v1` schema
@@ -1240,3 +1290,5 @@ DEFAULT (no migration 016 needed).
 - Provenance coefficient lookup (per ADR 004): live_mcp_capture=1.0, user_authored_seed=0.8, vendor_import=0.6
 - Primary LLM inference via Ollama (Gemma 4 models), Azure OpenAI as fallback only
 - Episode `content` is always verbatim — transcript excerpt, vendor export excerpt, or user-authored prose. Never LLM summarization. The `llm_reconstruction` ingestion mode does not exist and will not be added (see ADR 005).
+- Knowledge summaries (ADR-012) are derived artifacts stored in `loom_summaries`, not episodes or facts. They are produced offline from extracted facts by the consolidation worker and are invalidated when source facts are superseded. Summaries participate in warm-tier retrieval via `CandidatePayload::Summary`.
+- The scheduler runs four background jobs: daily snapshot, daily tier management, weekly entity health check, and daily consolidation (consolidation + pruning per namespace). See ADR-012.

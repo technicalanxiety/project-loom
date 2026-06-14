@@ -726,11 +726,14 @@ The operational dashboard is a Vite + React SPA served as static files by Caddy.
 7. **Retrieval Quality Metrics**: Precision over time, latency percentiles (p50, p95, p99), classification confidence distribution, hot-tier utilization per namespace
 8. **Extraction Quality View**: Model comparison (Gemma 4 vs gpt-4.1-mini), entity resolution method distribution, custom predicate growth rate, entity fragmentation detection
 9. **Benchmark Comparison**: Side-by-side A/B/C condition results
+10. **Consolidation Health**: Per-namespace consolidation and pruning activity. KPIs for active/invalidated summaries, latest run timestamps, recent run history table with per-phase details. Manual "Run consolidation now" button triggers an immediate consolidation + pruning cycle. See ADR-012.
 
 **Dashboard API Endpoints** (on loom-engine)
 - All GET endpoints are read-only
-- Only 2 POST endpoints: conflict resolution and predicate candidate resolution (with optional target_pack for pack-aware promotion)
+- POST endpoints: conflict resolution, predicate candidate resolution (with optional target_pack for pack-aware promotion), benchmark run/seed/cancel, and manual consolidation trigger
 - Namespace listing endpoint for dashboard navigation
+- Consolidation health: `GET /dashboard/api/consolidation/health/{namespace}`
+- Manual consolidation trigger: `POST /dashboard/api/consolidation/run/{namespace}`
 
 
 ## Data Models
@@ -904,15 +907,64 @@ CREATE TABLE loom_resolution_conflicts (
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- Namespace configuration (with predicate pack assignment)
+-- Namespace configuration (with predicate pack assignment and consolidation settings)
 CREATE TABLE loom_namespace_config (
   namespace         TEXT PRIMARY KEY,
   hot_tier_budget   INT DEFAULT 500,               -- tokens
   warm_tier_budget  INT DEFAULT 3000,              -- tokens
   predicate_packs   TEXT[] DEFAULT '{core}',       -- which predicate packs this namespace uses
   description       TEXT,
+  consolidation_min_cluster INT DEFAULT 5,         -- min facts per entity to trigger synthesis
+  consolidation_schedule TEXT DEFAULT 'daily',     -- schedule frequency
+  pruning_procedure_ttl_days INT DEFAULT 90,       -- days before stale procedures are pruned
+  pruning_conflict_ttl_days INT DEFAULT 60,        -- days before unresolved conflicts are auto-resolved
+  summary_invalidation_ttl_days INT DEFAULT 30,    -- days before invalidated summaries are soft-deleted
   created_at        TIMESTAMPTZ DEFAULT now(),
   updated_at        TIMESTAMPTZ DEFAULT now()
+);
+
+-- Knowledge summaries: Synthesized from fact clusters (ADR-012)
+CREATE TABLE loom_summaries (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  namespace           TEXT NOT NULL,
+  subject_entity_id   UUID NOT NULL REFERENCES loom_entities(id),
+  summary_text        TEXT NOT NULL,
+  source_facts        UUID[] NOT NULL,             -- fact UUIDs this summary was synthesized from
+  evidence_status     TEXT NOT NULL DEFAULT 'extracted',
+  contains_sole_source BOOLEAN DEFAULT false,
+  synthesis_model     TEXT NOT NULL,                -- e.g. "qwen2.5:14b"
+  synthesis_prompt_ver TEXT NOT NULL,               -- e.g. "consolidation_v1"
+  invalidated_at      TIMESTAMPTZ,                 -- set when a source fact is superseded
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  deleted_at          TIMESTAMPTZ
+);
+
+-- Summary serving state: Derived, recomputable
+CREATE TABLE loom_summary_state (
+  summary_id      UUID PRIMARY KEY REFERENCES loom_summaries(id),
+  embedding       vector(768),
+  token_count     INT DEFAULT 0,
+  access_count    INT DEFAULT 0,
+  last_accessed   TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Consolidation run log (ADR-012)
+CREATE TABLE loom_consolidation_log (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  namespace             TEXT NOT NULL,
+  run_type              TEXT NOT NULL CHECK (run_type IN ('consolidation', 'pruning')),
+  started_at            TIMESTAMPTZ DEFAULT now(),
+  completed_at          TIMESTAMPTZ,
+  status                TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')),
+  clusters_found        INT,
+  summaries_created     INT,
+  summaries_refreshed   INT,
+  procedures_pruned     INT,
+  conflicts_resolved    INT,
+  summaries_invalidated INT,
+  error_detail          TEXT,
+  duration_ms           INT
 );
 
 -- Comprehensive audit log

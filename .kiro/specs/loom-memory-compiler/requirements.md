@@ -33,6 +33,10 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 - **Parser_Version**: Semantic version identifier of a bootstrap parser (e.g. `claude_ai_parser@0.3.1`) populated on every `vendor_import` episode.
 - **Parser_Source_Schema**: Vendor export schema version a bootstrap parser asserts against (e.g. `claude_ai_export_v2`) populated on every `vendor_import` episode.
 - **LLM_Reconstruction_Trap**: The architectural pattern in which LLM summaries or paraphrases enter the authority hierarchy as first-class evidence, poisoning the provenance chain. Rejected by design — no ingestion mode accepts it, the `content` verbatim invariant forbids it, shipped client templates prevent it.
+- **Knowledge_Summary**: A higher-order derived artifact synthesized from a cluster of stable facts about a single entity. Stored in `loom_summaries`, not `loom_facts` or `loom_episodes` — summaries are never first-class evidence. See ADR-012.
+- **Consolidation**: The background phase that identifies entities with clusters of 5+ stable facts and synthesizes them into knowledge summaries via LLM, with a hallucination guard that rejects summaries citing non-existent fact UUIDs.
+- **Pruning**: The background phase that removes stale derived artifacts: procedures past their TTL, unresolved conflicts past their TTL, and invalidated summaries past their TTL.
+- **Consolidation_Log**: A record in `loom_consolidation_log` tracking each consolidation or pruning run with status, duration, counters, and error detail.
 
 
 ## Requirements
@@ -737,6 +741,7 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 8. THE Dashboard SHALL provide retrieval quality metrics including precision over time, latency percentiles (p50, p95, p99), classification confidence distribution, and hot-tier utilization per namespace
 9. THE Dashboard SHALL provide an extraction quality view with model comparison, entity resolution method distribution, custom predicate growth rate, and entity fragmentation detection results
 10. THE Dashboard SHALL provide a benchmark comparison view with side-by-side A/B/C condition results
+11. THE Dashboard SHALL provide a consolidation health view showing per-namespace summary inventory, run history, and a manual trigger button (see Requirement 61)
 
 ### Requirement 50: Dashboard API Endpoints
 
@@ -746,7 +751,7 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 
 1. THE Loom_Engine SHALL serve dashboard API endpoints from the same axum router as MCP and REST endpoints
 2. THE Loom_Engine SHALL expose read-only GET endpoints for pipeline health, episodes, entities, entity graph, facts, compilations, compilation detail, conflicts, predicate candidates, predicate packs, pack detail, pack predicates, active predicates per namespace, and all metrics
-3. THE Loom_Engine SHALL expose POST endpoints for conflict resolution and predicate candidate resolution as the only write operations on the dashboard API
+3. THE Loom_Engine SHALL expose POST endpoints for conflict resolution, predicate candidate resolution, benchmark run/seed/cancel, and manual consolidation trigger on the dashboard API
 4. WHEN resolving a predicate candidate via the dashboard API, THE Loom_Engine SHALL accept an optional target_pack field for pack-aware promotion
 5. THE Loom_Engine SHALL expose namespace listing endpoint for the Dashboard
 
@@ -872,6 +877,36 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
    - `templates/m365_copilot_instructions.md` — M365 Copilot declarative-agent `instructions` field
 6. Every discipline template SHALL include a bolded directive against summarizing, paraphrasing, or reconstructing — the language is load-bearing and must be preserved across revisions
 
+### Requirement 60: Memory Consolidation and Active Forgetting
+
+**User Story:** As a system operator, I want the system to automatically consolidate clusters of stable facts into higher-order summaries and prune stale derived artifacts, so that context packages remain concise and high-signal over time.
+
+#### Acceptance Criteria
+
+1. THE Loom_Engine SHALL identify entities with 5+ stable, non-superseded facts older than 48 hours as consolidation candidates, configurable per namespace via `consolidation_min_cluster`
+2. THE Loom_Engine SHALL synthesize a knowledge summary for each candidate cluster via the offline LLM, producing a coverage map where every claim cites source fact UUIDs
+3. THE Loom_Engine SHALL reject any synthesis whose coverage map references a fact UUID not present in the source cluster (hallucination guard)
+4. THE Loom_Engine SHALL store accepted summaries in `loom_summaries` with full provenance: `source_facts`, `synthesis_model`, `synthesis_prompt_ver`, `contains_sole_source`, and `invalidated_at`
+5. THE Loom_Engine SHALL stamp `invalidated_at` on summaries when any of their source facts are superseded during online extraction
+6. THE Loom_Engine SHALL soft-delete procedures whose `last_matched_at` exceeds `pruning_procedure_ttl_days` (default 90)
+7. THE Loom_Engine SHALL auto-resolve conflicts older than `pruning_conflict_ttl_days` (default 60) that remain unresolved
+8. THE Loom_Engine SHALL soft-delete summaries whose `invalidated_at` exceeds `summary_invalidation_ttl_days` (default 30)
+9. THE scheduler SHALL run consolidation + pruning on a daily cycle per namespace via the `daily_consolidation` background job
+10. THE Loom_Engine SHALL log every consolidation and pruning run to `loom_consolidation_log` with run type, status, duration, and per-phase counters
+
+### Requirement 61: Consolidation Dashboard View
+
+**User Story:** As a system operator, I want a dashboard page to monitor consolidation and pruning activity and trigger manual runs, so that I can observe memory lifecycle health and intervene when needed.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL display a Consolidation Health page accessible via the sidebar under Operations
+2. THE Dashboard SHALL show KPIs for active summaries, invalidated summaries, and latest consolidation/pruning run timestamps per namespace
+3. THE Dashboard SHALL show a recent activity table listing consolidation and pruning runs with type, status, started timestamp, duration, and per-phase detail counts
+4. THE Dashboard SHALL provide a "Run consolidation now" button that triggers an immediate consolidation + pruning cycle via `POST /dashboard/api/consolidation/run/{namespace}`
+5. THE Loom_Engine SHALL expose `GET /dashboard/api/consolidation/health/{namespace}` returning summary counts, latest run info, and recent run history
+6. THE Dashboard SHALL include a namespace selector following the same pattern as other dashboard pages (useNamespaces hook)
+
 ---
 
 ## Deferred Capabilities
@@ -879,7 +914,7 @@ Project Loom is a PostgreSQL-native memory compiler for AI workflows that provid
 The following capabilities are explicitly out of scope for the MVP and will be considered in future phases:
 
 - Advanced procedural mining beyond basic pattern flagging
-- Memify and semantic compaction of memory
+- ~~Memify and semantic compaction of memory~~ (partially addressed by consolidation pipeline — ADR-012)
 - Broad connector network (7+ sources)
 - Browser extensions for memory capture
 - Git-style memory versioning and history
@@ -890,6 +925,6 @@ The following capabilities are explicitly out of scope for the MVP and will be c
 - loom_inspect and loom_forget MCP tools
 - Restorable compression in context output
 - Advanced salience self-improvement algorithms
-- Sleep-time memify scheduler
+- ~~Sleep-time memify scheduler~~ (implemented as daily_consolidation scheduler job — ADR-012)
 - ChatGPT / Copilot / Azure DevOps connectors
 - Pack creation and namespace pack assignment via dashboard UI (handled via SQL or REST admin endpoint in MVP)
