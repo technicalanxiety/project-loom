@@ -97,7 +97,7 @@ impl DbPools {
                 Box::pin(async move {
                     // SET doesn't accept bind parameters; value is internal, not user input.
                     let stmt = format!("SET statement_timeout = '{statement_timeout_ms}ms'");
-                    sqlx::query(&sqlx::AssertSqlSafe(stmt)).execute(&mut *conn).await?;
+                    sqlx::query(sqlx::AssertSqlSafe(stmt)).execute(&mut *conn).await?;
                     Ok(())
                 })
             })
@@ -116,7 +116,7 @@ impl DbPools {
                     let offline_timeout_ms = statement_timeout_ms * 3;
                     // SET doesn't accept bind parameters; value is internal, not user input.
                     let stmt = format!("SET statement_timeout = '{offline_timeout_ms}ms'");
-                    sqlx::query(&sqlx::AssertSqlSafe(stmt)).execute(&mut *conn).await?;
+                    sqlx::query(sqlx::AssertSqlSafe(stmt)).execute(&mut *conn).await?;
                     Ok(())
                 })
             })
