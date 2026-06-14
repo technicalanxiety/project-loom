@@ -23,8 +23,8 @@ sqlx = { version = "0.9", default-features = false, features = [
     "json",
 ] }
 pgvector = { version = "0.4", features = ["sqlx"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0.207", features = ["derive"] }
+serde_json = "1.0.125"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 # Use ring as the rustls crypto provider — avoids aws-lc-sys which can't
 # cross-compile to musl without a full sysroot.
@@ -32,10 +32,10 @@ ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.39", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-thiserror = "2"
+thiserror = "1.0.60"
 tokio-util = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
