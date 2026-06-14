@@ -83,7 +83,7 @@ export const ConsolidationPage: React.FC<{ namespace: string }> = ({ namespace }
 
   return (
     <>
-      <PageHeader namespace={namespace} />
+      <PageHeader />
 
       <div className="kpi-grid">
         <div className="kpi accent">
