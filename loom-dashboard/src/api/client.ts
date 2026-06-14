@@ -14,6 +14,7 @@ import type {
   CompilationDetail,
   CompilationSummary,
   ConflictSummary,
+  ConsolidationHealthResponse,
   EntityDetail,
   EntitySummary,
   ExtractionMetrics,
@@ -281,4 +282,20 @@ export async function seedBenchmark(): Promise<SeedSummary> {
  * `{cancelled: false}` if the run was already in a terminal state. */
 export async function cancelBenchmark(id: string): Promise<CancelBenchmarkResponse> {
   return postJson<CancelBenchmarkResponse>(`/benchmarks/${encodeURIComponent(id)}/cancel`, {});
+}
+
+// ---------------------------------------------------------------------------
+// Consolidation health endpoints
+// ---------------------------------------------------------------------------
+
+/** Fetch consolidation health metrics for a namespace. */
+export async function getConsolidationHealth(namespace: string): Promise<ConsolidationHealthResponse> {
+  return fetchJson<ConsolidationHealthResponse>(
+    `/consolidation/health/${encodeURIComponent(namespace)}`
+  );
+}
+
+/** Trigger a manual consolidation run for a namespace. */
+export async function runConsolidationNow(namespace: string): Promise<{ status: string }> {
+  return postJson(`/consolidation/run/${encodeURIComponent(namespace)}`, {});
 }

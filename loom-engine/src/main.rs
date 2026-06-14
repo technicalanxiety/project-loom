@@ -319,8 +319,11 @@ async fn main() {
         cancel_token.clone(),
     ));
 
-    let _scheduler_handles =
-        scheduler::start_scheduler(state.pools.offline.clone(), cancel_token.clone());
+    let _scheduler_handles = scheduler::start_scheduler(
+        state.pools.offline.clone(),
+        state.llm_client.clone(),
+        cancel_token.clone(),
+    );
 
     let addr = SocketAddr::from(([0, 0, 0, 0], state.config.loom_port));
     tracing::info!("loom-engine listening on {}", addr);

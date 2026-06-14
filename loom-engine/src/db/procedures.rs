@@ -48,6 +48,10 @@ pub struct Procedure {
     pub embedding: Option<pgvector::Vector>,
     /// Tier placement: "hot" or "warm".
     pub tier: Option<String>,
+    /// Last time this procedure matched an episode; used for pruning eligibility.
+    pub last_matched_at: Option<DateTime<Utc>>,
+    /// Computed decay eligibility: last_matched_at + TTL_days. Used to prune stale candidates.
+    pub decay_eligible_at: Option<DateTime<Utc>>,
     /// Soft-delete timestamp.
     pub deleted_at: Option<DateTime<Utc>>,
 }
@@ -356,6 +360,89 @@ pub async fn query_deleted_procedures(
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------
+// Decay and Staleness
+// ---------------------------------------------------------------------------
+
+/// Query procedure candidates eligible for pruning due to age and low confidence.
+///
+/// Returns candidates with confidence < 0.8 (below promotion threshold) that
+/// either have not been matched in `ttl_days` or were never matched at all
+/// and are older than `ttl_days`.
+pub async fn query_stale_procedure_candidates(
+    pool: &PgPool,
+    namespace: &str,
+    ttl_days: i32,
+) -> Result<Vec<Procedure>, ProcedureError> {
+    let rows = sqlx::query_as::<_, Procedure>(
+        r#"
+        SELECT *
+        FROM loom_procedures
+        WHERE namespace = $1
+          AND confidence < 0.8
+          AND deleted_at IS NULL
+          AND (
+            -- Matched before but not recently
+            (last_matched_at IS NOT NULL AND last_matched_at < now() - (INTERVAL '1 day' * $2))
+            -- OR never matched at all and is old
+            OR (last_matched_at IS NULL AND created_at < now() - (INTERVAL '1 day' * $2))
+          )
+        ORDER BY last_matched_at ASC NULLS FIRST
+        "#,
+    )
+    .bind(namespace)
+    .bind(ttl_days as i64)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Update a procedure's last_matched_at timestamp when it matches an episode.
+///
+/// Called during episode processing when a procedure pattern is observed.
+/// Updates last_matched_at to the current time.
+pub async fn update_last_matched(pool: &PgPool, id: Uuid) -> Result<Procedure, ProcedureError> {
+    let row = sqlx::query_as::<_, Procedure>(
+        "UPDATE loom_procedures SET last_matched_at = now() WHERE id = $1 RETURNING *"
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Delete stale procedure candidates (soft-delete).
+///
+/// Called during pruning phase to remove candidates that have not been
+/// reinforced in the configured TTL. Returns the count of deleted rows.
+pub async fn delete_stale_procedures(
+    pool: &PgPool,
+    namespace: &str,
+    ttl_days: i32,
+) -> Result<u64, ProcedureError> {
+    let result = sqlx::query(
+        r#"
+        UPDATE loom_procedures
+        SET deleted_at = now()
+        WHERE namespace = $1
+          AND confidence < 0.8
+          AND deleted_at IS NULL
+          AND (
+            (last_matched_at IS NOT NULL AND last_matched_at < now() - (INTERVAL '1 day' * $2))
+            OR (last_matched_at IS NULL AND created_at < now() - (INTERVAL '1 day' * $2))
+          )
+        "#,
+    )
+    .bind(namespace)
+    .bind(ttl_days as i64)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +485,8 @@ mod tests {
             confidence: Some(0.3),
             embedding: None,
             tier: Some("warm".to_string()),
+            last_matched_at: None,
+            decay_eligible_at: None,
             deleted_at: None,
         };
         let debug = format!("{proc:?}");

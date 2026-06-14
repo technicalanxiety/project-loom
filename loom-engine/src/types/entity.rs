@@ -183,6 +183,8 @@ pub struct ResolutionConflict {
     pub resolved_at: Option<DateTime<Utc>>,
     /// When the conflict was created.
     pub created_at: Option<DateTime<Utc>>,
+    /// Computed auto-resolution deadline: created_at + TTL_days. Used to auto-resolve stale conflicts.
+    pub auto_resolve_at: Option<DateTime<Utc>>,
 }
 
 // ---------------------------------------------------------------------------

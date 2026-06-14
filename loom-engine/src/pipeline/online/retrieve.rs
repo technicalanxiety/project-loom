@@ -253,6 +253,8 @@ pub enum CandidatePayload {
     Graph(GraphCandidate),
     /// A procedure from the `procedure_assist` profile.
     Procedure(ProcedureCandidate),
+    /// A knowledge summary from fact consolidation.
+    Summary(SummaryCandidate),
 }
 
 /// Payload for a fact candidate.
@@ -294,6 +296,23 @@ pub struct ProcedureCandidate {
     pub pattern: String,
     pub confidence: f64,
     pub observation_count: i32,
+    pub namespace: String,
+}
+
+/// Payload for a knowledge summary candidate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryCandidate {
+    /// UUID of the summary.
+    pub summary_id: Uuid,
+    /// The subject entity this summary describes.
+    pub subject_entity_id: Uuid,
+    /// The consolidated summary text.
+    pub summary_text: String,
+    /// Number of facts this summary was synthesized from.
+    pub fact_count: i32,
+    /// Reliability classification: 'extracted' or 'confirmed'.
+    pub evidence_status: String,
+    /// Namespace isolation boundary.
     pub namespace: String,
 }
 

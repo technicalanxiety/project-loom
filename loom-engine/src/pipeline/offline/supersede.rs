@@ -14,6 +14,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::facts::{self, FactError};
+use crate::db::entities;
 use crate::types::fact::Fact;
 
 /// Errors that can occur during supersession resolution.
@@ -126,6 +127,16 @@ pub async fn resolve_supersessions(
             current_new_fact.valid_from,
         )
         .await?;
+
+        // Invalidate any summaries that reference this superseded fact.
+        // The consolidation pipeline will re-synthesize or clean up invalidated summaries.
+        if let Err(e) = entities::invalidate_summaries_by_fact(pool, old_fact.id).await {
+            tracing::warn!(
+                old_fact_id = %old_fact.id,
+                error = %e,
+                "failed to invalidate summaries for superseded fact"
+            );
+        }
 
         superseded_count += 1;
     }

@@ -20,7 +20,7 @@ use crate::types::classification::TaskClass;
 
 /// Memory weights for a given task class.
 ///
-/// Tuple order: `(episodic, semantic, procedural)`.
+/// Tuple order: `(episodic, semantic, procedural, summary)`.
 /// Graph candidates are treated as semantic for weighting purposes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MemoryWeights {
@@ -30,43 +30,50 @@ pub struct MemoryWeights {
     pub semantic: f64,
     /// Weight for procedural memory (behavioral patterns).
     pub procedural: f64,
+    /// Weight for summaries (compressed fact clusters).
+    pub summary: f64,
 }
 
 /// Return the memory weight modifiers for a given task class.
 ///
-/// | Task Class     | Episodic | Semantic | Procedural |
-/// |----------------|----------|----------|------------|
-/// | Debug          | 1.0      | 0.7      | 0.8        |
-/// | Architecture   | 0.5      | 1.0      | 0.3        |
-/// | Compliance     | 1.0      | 0.8      | 0.0        |
-/// | Writing        | 0.3      | 1.0      | 0.6        |
-/// | Chat           | 0.4      | 1.0      | 0.3        |
+/// | Task Class     | Episodic | Semantic | Procedural | Summary |
+/// |----------------|----------|----------|------------|---------|
+/// | Debug          | 1.0      | 0.7      | 0.8        | 0.5     |
+/// | Architecture   | 0.5      | 1.0      | 0.3        | 0.8     |
+/// | Compliance     | 1.0      | 0.8      | 0.0        | 0.3     |
+/// | Writing        | 0.3      | 1.0      | 0.6        | 0.9     |
+/// | Chat           | 0.4      | 1.0      | 0.3        | 0.7     |
 pub fn memory_weights(class: &TaskClass) -> MemoryWeights {
     match class {
         TaskClass::Debug => MemoryWeights {
             episodic: 1.0,
             semantic: 0.7,
             procedural: 0.8,
+            summary: 0.5,
         },
         TaskClass::Architecture => MemoryWeights {
             episodic: 0.5,
             semantic: 1.0,
             procedural: 0.3,
+            summary: 0.8,
         },
         TaskClass::Compliance => MemoryWeights {
             episodic: 1.0,
             semantic: 0.8,
             procedural: 0.0,
+            summary: 0.3,
         },
         TaskClass::Writing => MemoryWeights {
             episodic: 0.3,
             semantic: 1.0,
             procedural: 0.6,
+            summary: 0.9,
         },
         TaskClass::Chat => MemoryWeights {
             episodic: 0.4,
             semantic: 1.0,
             procedural: 0.3,
+            summary: 0.7,
         },
     }
 }
@@ -152,6 +159,32 @@ pub fn apply_weights(
     );
 
     result
+}
+
+// ---------------------------------------------------------------------------
+// Compression Bonus for Summaries
+// ---------------------------------------------------------------------------
+
+/// Apply a compression bonus to summary candidates based on fact coverage.
+///
+/// Summaries that cover N facts in T tokens get a bonus of `log2(N) * 0.1`
+/// to their relevance score, reflecting information density. This nudges
+/// summaries above their constituent facts when relevance is otherwise similar.
+///
+/// # Example
+///
+/// - 5-fact summary: +0.23 bonus
+/// - 8-fact summary: +0.30 bonus
+/// - 16-fact summary: +0.40 bonus
+pub fn apply_compression_bonus(relevance_score: f64, fact_count: i32) -> f64 {
+    if fact_count <= 1 {
+        return relevance_score;
+    }
+
+    let n = fact_count as f64;
+    let bonus = n.max(1.0).log2() * 0.1;
+
+    relevance_score + bonus
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +386,49 @@ mod tests {
         assert!(
             (weight_for_memory_type(&TaskClass::Architecture, &MemoryType::Graph) - 1.0).abs()
                 < f64::EPSILON
+        );
+    }
+
+    #[test]
+    fn compression_bonus_for_single_fact_is_zero() {
+        let score = 0.8;
+        let bonused = apply_compression_bonus(score, 1);
+        assert!((bonused - score).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn compression_bonus_for_five_facts() {
+        let score = 0.8;
+        let bonused = apply_compression_bonus(score, 5);
+        // log2(5) ≈ 2.32, * 0.1 = 0.232
+        let expected = score + (5.0_f64.log2() * 0.1);
+        assert!(
+            (bonused - expected).abs() < 0.001,
+            "expected {expected}, got {bonused}"
+        );
+    }
+
+    #[test]
+    fn compression_bonus_for_eight_facts() {
+        let score = 0.8;
+        let bonused = apply_compression_bonus(score, 8);
+        // log2(8) = 3.0, * 0.1 = 0.3
+        let expected = score + 0.3;
+        assert!(
+            (bonused - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {bonused}"
+        );
+    }
+
+    #[test]
+    fn compression_bonus_for_sixteen_facts() {
+        let score = 0.9;
+        let bonused = apply_compression_bonus(score, 16);
+        // log2(16) = 4.0, * 0.1 = 0.4
+        let expected = score + 0.4;
+        assert!(
+            (bonused - expected).abs() < f64::EPSILON,
+            "expected {expected}, got {bonused}"
         );
     }
 }

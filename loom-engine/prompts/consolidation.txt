@@ -1,0 +1,46 @@
+You are consolidating a cluster of facts about a single entity into a knowledge summary.
+
+Entity: {{ENTITY_NAME}} (type: {{ENTITY_TYPE}})
+Namespace: {{NAMESPACE}}
+
+Facts to consolidate (each with its ID for traceability):
+
+{{FACT_LIST}}
+
+## Consolidation Rules
+
+1. **Coherent Paragraph**: Produce a single coherent paragraph that captures the generalized state of knowledge about this entity across all provided facts.
+
+2. **Traceability**: Every claim in your summary must be traceable to at least one fact ID. After the summary paragraph, produce a "coverage" array mapping each claim to its source fact IDs.
+
+3. **No Hallucination**: Do not introduce relationships, capabilities, or states not present in the input facts. If facts conflict, state the conflict explicitly rather than resolving it.
+
+4. **Temporal Evolution**: Prefer the most recent temporal state when facts show evolution over time. Name the evolution ("previously X, now Y") rather than dropping the history.
+
+5. **Single-Source Notation**: If a fact has evidence_status "sole_source_flagged", note it as single-source in the summary to flag audit concerns.
+
+6. **Conflict Detection**: If you identify contradictions or inconsistencies among source facts, record them in the "conflicts_detected" array with clear descriptions of what conflicts and which facts are involved.
+
+## Output Format
+
+Return ONLY valid JSON with no preamble, no markdown fencing, and no explanation. Use exactly this structure:
+
+{
+  "summary_text": "A single coherent paragraph summarizing all facts about the entity...",
+  "coverage": [
+    {
+      "claim": "short description of claim",
+      "source_fact_ids": ["uuid1", "uuid2"]
+    }
+  ],
+  "conflicts_detected": [
+    {
+      "description": "Fact A says X, Fact B says Y (contradictory)",
+      "fact_ids": ["uuid1", "uuid2"]
+    }
+  ]
+}
+
+If no conflicts are detected, return an empty array for "conflicts_detected": [].
+
+Each claim in coverage must have at least one source fact ID. Every source fact ID in the input must appear in at least one coverage claim.

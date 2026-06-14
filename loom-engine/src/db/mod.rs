@@ -1,6 +1,7 @@
 // loom-engine/src/db — Database access layer (sqlx, compile-time checked queries)
 
 pub mod audit;
+pub mod consolidation;
 pub mod dashboard;
 pub mod entities;
 pub mod episodes;

@@ -98,8 +98,20 @@ pub fn evidence_authority(status: &str) -> f64 {
 ///
 /// Uses the weight-modified score from the weighting stage. The score is
 /// already in `[0.0, 1.0]` after weight application.
+///
+/// For summaries, applies a compression bonus based on fact coverage:
+/// summaries covering N facts get an additional `log2(N) * 0.1` to their
+/// relevance score, reflecting their information density.
 pub fn score_relevance(weighted: &WeightedCandidate) -> f64 {
-    weighted.weighted_score.clamp(0.0, 1.0)
+    let base_score = weighted.weighted_score.clamp(0.0, 1.0);
+
+    // Apply compression bonus for summaries
+    if let CandidatePayload::Summary(summary) = &weighted.candidate.payload {
+        use crate::pipeline::online::weight::apply_compression_bonus;
+        apply_compression_bonus(base_score, summary.fact_count).clamp(0.0, 1.0)
+    } else {
+        base_score
+    }
 }
 
 /// Score the **recency** dimension for a candidate.
@@ -136,6 +148,11 @@ pub fn score_recency(candidate: &RetrievalCandidate) -> f64 {
         CandidatePayload::Procedure(_) => {
             // Procedures are long-lived patterns; moderate recency.
             0.5
+        }
+        CandidatePayload::Summary(_) => {
+            // Summaries are derived artifacts; give them moderate recency
+            // (they're refreshed when their source facts change).
+            0.6
         }
     }
 }
@@ -184,6 +201,13 @@ pub fn score_stability(candidate: &RetrievalCandidate) -> f64 {
             let confidence_component = p.confidence * 0.5;
             let observation_component = (p.observation_count as f64 / 10.0).min(1.0) * 0.5;
             (confidence_component + observation_component).clamp(0.0, 1.0)
+        }
+        CandidatePayload::Summary(s) => {
+            // Summaries: stability based on evidence status and fact coverage.
+            let authority = evidence_authority(&s.evidence_status) * 0.6;
+            // More facts = more stable (higher coverage)
+            let coverage = (s.fact_count as f64 / 10.0).min(1.0) * 0.4;
+            (authority + coverage).clamp(0.0, 1.0)
         }
     }
 }
@@ -240,6 +264,13 @@ fn score_provenance_base(candidate: &RetrievalCandidate) -> f64 {
             let obs_score = (p.observation_count as f64 / 10.0).min(1.0) * 0.6;
             let confidence_score = p.confidence * 0.4;
             (obs_score + confidence_score).clamp(0.0, 1.0)
+        }
+        CandidatePayload::Summary(s) => {
+            // Summaries: provenance based on fact coverage and evidence status.
+            // Higher fact count = more robust generalization
+            let coverage_score = (s.fact_count as f64 / 10.0).min(1.0) * 0.6;
+            let authority = evidence_authority(&s.evidence_status) * 0.4;
+            (coverage_score + authority).clamp(0.0, 1.0)
         }
     }
 }

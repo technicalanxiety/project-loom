@@ -18,6 +18,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::db::snapshots::{self, NewSnapshot};
+use crate::llm::client::LlmClient;
+use crate::worker::consolidator;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -105,10 +107,11 @@ pub struct DuplicateEntityPair {
 
 /// Start all scheduled background jobs.
 ///
-/// Spawns three tokio tasks:
+/// Spawns four tokio tasks:
 /// 1. Daily hot tier snapshot (every 24 hours).
 /// 2. Daily tier promotion/demotion check (every 24 hours).
 /// 3. Weekly entity health check (every 7 days).
+/// 4. Daily consolidation cycle (every 24 hours, checks per-namespace schedules).
 ///
 /// All tasks are cancellable via the provided [`CancellationToken`].
 /// Returns a `Vec` of [`tokio::task::JoinHandle`] for each spawned task.
@@ -116,9 +119,11 @@ pub struct DuplicateEntityPair {
 /// # Arguments
 ///
 /// * `pool` — The **offline** database connection pool.
+/// * `ollama` — The Ollama LLM client for synthesis.
 /// * `cancel_token` — Token to signal graceful shutdown of all jobs.
 pub fn start_scheduler(
     pool: PgPool,
+    llm: LlmClient,
     cancel_token: CancellationToken,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     tracing::info!("starting scheduled task runner");
@@ -168,7 +173,24 @@ pub fn start_scheduler(
         .await;
     });
 
-    vec![snapshot_handle, tier_handle, health_handle]
+    let consolidation_pool = pool.clone();
+    let consolidation_llm = llm.clone();
+    let consolidation_token = cancel_token.clone();
+    let consolidation_handle = tokio::spawn(async move {
+        run_periodic(
+            "daily_consolidation",
+            DAILY_INTERVAL,
+            consolidation_token,
+            move || {
+                let p = consolidation_pool.clone();
+                let l = consolidation_llm.clone();
+                async move { run_consolidation_cycle(&p, &l).await }
+            },
+        )
+        .await;
+    });
+
+    vec![snapshot_handle, tier_handle, health_handle, consolidation_handle]
 }
 
 // ---------------------------------------------------------------------------
@@ -698,6 +720,78 @@ async fn query_duplicate_entity_pairs(
     .await?;
 
     Ok(rows)
+}
+
+// ---------------------------------------------------------------------------
+// Consolidation Phase
+// ---------------------------------------------------------------------------
+
+/// Run the consolidation cycle: synthesis and pruning for all due namespaces.
+///
+/// Checks each namespace's configuration to see if consolidation is due
+/// (per the configured schedule), then runs both consolidation and pruning
+/// phases sequentially. Results are logged.
+async fn run_consolidation_cycle(
+    pool: &PgPool,
+    llm: &LlmClient,
+) -> Result<(), SchedulerError> {
+    // Query all active namespaces
+    let namespaces: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT namespace FROM loom_namespace_config ORDER BY namespace"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for namespace in namespaces {
+        // Get namespace config
+        let config = sqlx::query!(
+            r#"
+            SELECT consolidation_min_cluster,
+                   consolidation_schedule,
+                   pruning_procedure_ttl_days,
+                   pruning_conflict_ttl_days,
+                   COALESCE(summary_invalidation_ttl_days, 30) as summary_invalidation_ttl_days
+            FROM loom_namespace_config
+            WHERE namespace = $1
+            "#,
+            &namespace
+        )
+        .fetch_one(pool)
+        .await?;
+
+        let min_cluster = config.consolidation_min_cluster.unwrap_or(5);
+        let procedure_ttl = config.pruning_procedure_ttl_days.unwrap_or(90);
+        let conflict_ttl = config.pruning_conflict_ttl_days.unwrap_or(60);
+        let summary_ttl = config.summary_invalidation_ttl_days.unwrap_or(30);
+
+        // Run consolidation phase
+        match consolidator::run_consolidation_phase(pool, llm, &namespace, min_cluster).await {
+            Ok(log) => {
+                if let Err(e) = crate::db::consolidation::insert_consolidation_log(pool, &log).await {
+                    tracing::warn!(namespace = %namespace, error = %e, "failed to log consolidation");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(namespace = %namespace, error = %e, "consolidation phase failed");
+            }
+        }
+
+        // Run pruning phase
+        match consolidator::run_pruning_phase(pool, &namespace, procedure_ttl, conflict_ttl, summary_ttl)
+            .await
+        {
+            Ok(log) => {
+                if let Err(e) = crate::db::consolidation::insert_consolidation_log(pool, &log).await {
+                    tracing::warn!(namespace = %namespace, error = %e, "failed to log pruning");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(namespace = %namespace, error = %e, "pruning phase failed");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

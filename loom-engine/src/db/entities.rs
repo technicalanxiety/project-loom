@@ -418,6 +418,297 @@ pub async fn query_deleted_entities(
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge Summaries
+// ---------------------------------------------------------------------------
+
+/// Data required to insert a new knowledge summary.
+///
+/// Mirrors the caller-provided columns of `loom_summaries`. The database
+/// assigns `id`, `created_at`, and `refreshed_at` via defaults.
+#[derive(Debug)]
+pub struct NewSummary {
+    /// Namespace isolation boundary.
+    pub namespace: String,
+    /// The entity this summary describes.
+    pub subject_entity_id: Uuid,
+    /// The consolidated summary text.
+    pub summary_text: String,
+    /// UUIDs of facts this summary was synthesized from.
+    pub source_facts: Vec<Uuid>,
+    /// Reliability classification.
+    pub evidence_status: String,
+    /// Whether any source fact has sole_source_flagged status.
+    pub contains_sole_source: bool,
+    /// Model used to synthesize.
+    pub synthesis_model: String,
+    /// Consolidation prompt version.
+    pub synthesis_prompt_ver: String,
+}
+
+/// Insert a new knowledge summary.
+///
+/// Creates a summary record with synthesis metadata. The database assigns
+/// id, created_at, and refreshed_at via defaults.
+pub async fn insert_summary(pool: &PgPool, summary: &NewSummary) -> Result<crate::types::summary::KnowledgeSummary, EntityError> {
+    use crate::types::summary::KnowledgeSummary;
+
+    let row = sqlx::query_as::<_, KnowledgeSummary>(
+        r#"
+        INSERT INTO loom_summaries (
+            namespace, subject_entity_id, summary_text, source_facts, fact_count,
+            evidence_status, contains_sole_source, synthesis_model, synthesis_prompt_ver
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+        "#,
+    )
+    .bind(&summary.namespace)
+    .bind(summary.subject_entity_id)
+    .bind(&summary.summary_text)
+    .bind(&summary.source_facts)
+    .bind(summary.source_facts.len() as i32)
+    .bind(&summary.evidence_status)
+    .bind(summary.contains_sole_source)
+    .bind(&summary.synthesis_model)
+    .bind(&summary.synthesis_prompt_ver)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Fetch a knowledge summary by its UUID.
+///
+/// Returns `None` if no summary with the given id exists or if it's soft-deleted.
+pub async fn get_summary_by_id(pool: &PgPool, id: Uuid) -> Result<Option<crate::types::summary::KnowledgeSummary>, EntityError> {
+    use crate::types::summary::KnowledgeSummary;
+
+    let row = sqlx::query_as::<_, KnowledgeSummary>(
+        "SELECT * FROM loom_summaries WHERE id = $1 AND deleted_at IS NULL"
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Query all active summaries for a given entity.
+///
+/// Returns summaries that are not deleted and not invalidated, ordered by
+/// creation time descending.
+pub async fn query_summaries_by_entity(
+    pool: &PgPool,
+    entity_id: Uuid,
+) -> Result<Vec<crate::types::summary::KnowledgeSummary>, EntityError> {
+    use crate::types::summary::KnowledgeSummary;
+
+    let rows = sqlx::query_as::<_, KnowledgeSummary>(
+        r#"
+        SELECT *
+        FROM loom_summaries
+        WHERE subject_entity_id = $1
+          AND deleted_at IS NULL
+          AND invalidated_at IS NULL
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(entity_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Query recent summaries in a namespace.
+///
+/// Returns active summaries ordered by creation time descending, with an optional
+/// tier filter ('hot' or 'warm').
+pub async fn query_summaries_by_namespace(
+    pool: &PgPool,
+    namespace: &str,
+    tier: Option<&str>,
+    limit: i64,
+) -> Result<Vec<crate::types::summary::KnowledgeSummary>, EntityError> {
+    use crate::types::summary::KnowledgeSummary;
+
+    if let Some(tier) = tier {
+        let rows = sqlx::query_as::<_, KnowledgeSummary>(
+            r#"
+            SELECT *
+            FROM loom_summaries
+            WHERE namespace = $1
+              AND tier = $2
+              AND deleted_at IS NULL
+              AND invalidated_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(namespace)
+        .bind(tier)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows)
+    } else {
+        let rows = sqlx::query_as::<_, KnowledgeSummary>(
+            r#"
+            SELECT *
+            FROM loom_summaries
+            WHERE namespace = $1
+              AND deleted_at IS NULL
+              AND invalidated_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(namespace)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows)
+    }
+}
+
+/// Mark a summary as invalidated when one of its source facts is superseded.
+///
+/// Sets `invalidated_at = now()` for all summaries that reference the given fact ID.
+pub async fn invalidate_summaries_by_fact(pool: &PgPool, fact_id: Uuid) -> Result<u64, EntityError> {
+    let result = sqlx::query(
+        r#"
+        UPDATE loom_summaries
+        SET invalidated_at = now()
+        WHERE $1 = ANY(source_facts)
+          AND deleted_at IS NULL
+          AND invalidated_at IS NULL
+        "#,
+    )
+    .bind(fact_id)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
+/// Upsert knowledge summary serving state into `loom_summary_state`.
+///
+/// Inserts a new row or updates the existing row on conflict with `summary_id`.
+pub async fn update_summary_state(
+    pool: &PgPool,
+    summary_id: Uuid,
+    embedding: Option<&pgvector::Vector>,
+    token_count: i32,
+    access_count: i32,
+    last_accessed: Option<DateTime<Utc>>,
+) -> Result<crate::types::summary::SummaryState, EntityError> {
+    use crate::types::summary::SummaryState;
+
+    let row = sqlx::query_as::<_, SummaryState>(
+        r#"
+        INSERT INTO loom_summary_state (
+            summary_id, embedding, token_count, access_count, last_accessed, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, now())
+        ON CONFLICT (summary_id) DO UPDATE SET
+            embedding = COALESCE($2, loom_summary_state.embedding),
+            token_count = $3,
+            access_count = $4,
+            last_accessed = $5,
+            updated_at = now()
+        RETURNING *
+        "#,
+    )
+    .bind(summary_id)
+    .bind(embedding)
+    .bind(token_count)
+    .bind(access_count)
+    .bind(last_accessed)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+/// Soft-delete a knowledge summary.
+///
+/// Sets `deleted_at = now()`. The row remains queryable for audit purposes.
+pub async fn soft_delete_summary(pool: &PgPool, id: Uuid) -> Result<crate::types::summary::KnowledgeSummary, EntityError> {
+    use crate::types::summary::KnowledgeSummary;
+
+    let row = sqlx::query_as::<_, KnowledgeSummary>(
+        "UPDATE loom_summaries SET deleted_at = now() WHERE id = $1 RETURNING *"
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
+// ---------------------------------------------------------------------------
+// Resolution Conflicts — Decay/Staleness
+// ---------------------------------------------------------------------------
+
+/// Query resolution conflicts eligible for auto-resolution due to age.
+///
+/// Returns conflicts that were created before the configured TTL ago,
+/// have not been manually resolved, and are older than the threshold.
+pub async fn query_unresolved_conflicts_due(
+    pool: &PgPool,
+    namespace: &str,
+    ttl_days: i32,
+) -> Result<Vec<crate::types::entity::ResolutionConflict>, EntityError> {
+    use crate::types::entity::ResolutionConflict;
+
+    let rows = sqlx::query_as::<_, ResolutionConflict>(
+        r#"
+        SELECT *
+        FROM loom_resolution_conflicts
+        WHERE namespace = $1
+          AND resolved_at IS NULL
+          AND created_at < now() - (INTERVAL '1 day' * $2)
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(namespace)
+    .bind(ttl_days as i64)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+/// Auto-resolve a conflict in the conservative direction (keep separate).
+///
+/// Sets resolved_at and resolution fields for a conflict that has aged past
+/// the TTL without manual intervention.
+pub async fn auto_resolve_conflict(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<crate::types::entity::ResolutionConflict, EntityError> {
+    use crate::types::entity::ResolutionConflict;
+
+    let row = sqlx::query_as::<_, ResolutionConflict>(
+        r#"
+        UPDATE loom_resolution_conflicts
+        SET resolved_at = now(),
+            resolution = 'auto_separate',
+            resolved = true
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(row)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

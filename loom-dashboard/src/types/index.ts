@@ -522,6 +522,54 @@ export interface ExtractionError {
   occurred_at: number;
 }
 
+// ---------------------------------------------------------------------------
+// Consolidation (/dashboard/api/consolidation/*)
+// ---------------------------------------------------------------------------
+
+/** A knowledge summary entry. */
+export interface KnowledgeSummary {
+  id: string;
+  namespace: string;
+  subject_entity_id: string;
+  summary_text: string;
+  fact_count: number;
+  evidence_status: string;
+  contains_sole_source: boolean;
+  synthesis_model: string;
+  tier: string;
+  created_at: string;
+  refreshed_at: string;
+}
+
+/** A consolidation or pruning run. */
+export interface ConsolidationRun {
+  id: string;
+  namespace: string;
+  run_type: 'consolidation' | 'pruning';
+  started_at: string;
+  completed_at: string | null;
+  status: 'running' | 'completed' | 'failed';
+  clusters_found?: number;
+  summaries_created?: number;
+  summaries_refreshed?: number;
+  procedures_pruned?: number;
+  conflicts_resolved?: number;
+  summaries_invalidated?: number;
+  error_detail?: string;
+  duration_ms?: number;
+}
+
+/** Consolidation health metrics. */
+export interface ConsolidationHealthResponse {
+  namespace: string;
+  latest_consolidation_run: ConsolidationRun | null;
+  latest_pruning_run: ConsolidationRun | null;
+  total_summaries: number;
+  active_summaries: number;
+  invalidated_summaries: number;
+  recent_runs: ConsolidationRun[];
+}
+
 /** Snapshot pushed over SSE once per second. */
 export interface TelemetrySnapshot {
   ts: number;
