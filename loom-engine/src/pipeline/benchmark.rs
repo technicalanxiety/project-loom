@@ -1169,7 +1169,7 @@ pub async fn reap_stale_benchmark_runs(
              AND created_at < NOW() - (INTERVAL '1 hour' * "
     );
     qb.push_bind(threshold_hours);
-    qb.push_sql(") RETURNING id) SELECT COUNT(*) FROM reaped");
+    qb.push(") RETURNING id) SELECT COUNT(*) FROM reaped");
     let count: i64 = qb.build_query_scalar().fetch_one(pool).await?;
     if count > 0 {
         tracing::warn!(
