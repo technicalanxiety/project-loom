@@ -744,25 +744,25 @@ async fn run_consolidation_cycle(
 
     for namespace in namespaces {
         // Get namespace config
-        let config = sqlx::query!(
-            r#"
-            SELECT consolidation_min_cluster,
-                   consolidation_schedule,
-                   pruning_procedure_ttl_days,
-                   pruning_conflict_ttl_days,
-                   COALESCE(summary_invalidation_ttl_days, 30) as summary_invalidation_ttl_days
-            FROM loom_namespace_config
-            WHERE namespace = $1
-            "#,
-            &namespace
-        )
-        .fetch_one(pool)
-        .await?;
+        let (min_cluster_opt, _schedule, procedure_ttl_opt, conflict_ttl_opt, summary_ttl) =
+            sqlx::query_as::<_, (Option<i32>, String, Option<i32>, Option<i32>, i32)>(
+                r#"
+                SELECT consolidation_min_cluster,
+                       consolidation_schedule,
+                       pruning_procedure_ttl_days,
+                       pruning_conflict_ttl_days,
+                       COALESCE(summary_invalidation_ttl_days, 30) as summary_invalidation_ttl_days
+                FROM loom_namespace_config
+                WHERE namespace = $1
+                "#,
+            )
+            .bind(&namespace)
+            .fetch_one(pool)
+            .await?;
 
-        let min_cluster = config.consolidation_min_cluster.unwrap_or(5);
-        let procedure_ttl = config.pruning_procedure_ttl_days.unwrap_or(90);
-        let conflict_ttl = config.pruning_conflict_ttl_days.unwrap_or(60);
-        let summary_ttl = config.summary_invalidation_ttl_days.unwrap_or(30);
+        let min_cluster = min_cluster_opt.unwrap_or(5);
+        let procedure_ttl = procedure_ttl_opt.unwrap_or(90);
+        let conflict_ttl = conflict_ttl_opt.unwrap_or(60);
 
         // Run consolidation phase
         match consolidator::run_consolidation_phase(pool, llm, &namespace, min_cluster).await {

@@ -126,7 +126,7 @@ async fn identify_clusters(
     min_cluster_size: usize,
 ) -> Result<Vec<FactCluster>, sqlx::Error> {
     // Query for entities with enough facts
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as::<_, (Uuid, String, String, i64)>(
         r#"
         SELECT e.id, e.name, e.entity_type, COUNT(f.id) as fact_count
         FROM loom_entities e
@@ -140,15 +140,15 @@ async fn identify_clusters(
         ORDER BY COUNT(f.id) DESC
         LIMIT 20
         "#,
-        namespace,
-        min_cluster_size as i64
     )
+    .bind(namespace)
+    .bind(min_cluster_size as i64)
     .fetch_all(pool)
     .await?;
 
     let mut clusters = Vec::new();
 
-    for row in rows {
+    for (entity_id, entity_name, entity_type, _) in rows {
         // Fetch full fact details for this entity
         let facts = sqlx::query_as::<_, (Uuid, String, String, String, String)>(
             r#"
@@ -165,7 +165,7 @@ async fn identify_clusters(
               AND f.created_at < now() - INTERVAL '48 hours'
             "#,
         )
-        .bind(row.id)
+        .bind(entity_id)
         .bind(namespace)
         .fetch_all(pool)
         .await?;
@@ -183,9 +183,9 @@ async fn identify_clusters(
             .collect();
 
         clusters.push(FactCluster {
-            entity_id: row.id,
-            entity_name: row.name,
-            entity_type: row.entity_type,
+            entity_id,
+            entity_name,
+            entity_type,
             namespace: namespace.to_string(),
             fact_ids,
             facts: facts_with_text,
@@ -256,6 +256,9 @@ async fn synthesize_cluster(
         .iter()
         .any(|f| f.evidence_status == "sole_source_flagged");
 
+    // Clone summary text before moving into NewSummary
+    let summary_text = synthesis.summary_text.clone();
+
     // Upsert summary
     let summary = entities::insert_summary(
         pool,
@@ -275,12 +278,12 @@ async fn synthesize_cluster(
 
     // Embed and store state
     let embedding_vec = llm
-        .call_embeddings(&model, &synthesis.summary_text)
+        .call_embeddings(&model, &summary_text)
         .await
         .map_err(|e| ConsolidationError::Llm(e.to_string()))?;
     let embedding = Vector::from(embedding_vec);
 
-    let token_count = estimate_tokens(&synthesis.summary_text);
+    let token_count = estimate_tokens(&summary_text);
 
     entities::update_summary_state(pool, summary.id, Some(&embedding), token_count, 0, None)
         .await
@@ -371,22 +374,22 @@ async fn get_namespace_config(
     pool: &PgPool,
     namespace: &str,
 ) -> Result<NamespaceConsolidationConfig, sqlx::Error> {
-    let row = sqlx::query!(
+    let (min_cluster, hot_budget) = sqlx::query_as::<_, (Option<i32>, Option<i32>)>(
         "SELECT consolidation_min_cluster, hot_tier_budget FROM loom_namespace_config WHERE namespace = $1",
-        namespace
     )
+    .bind(namespace)
     .fetch_one(pool)
     .await?;
 
     // Determine synthesis model based on tier budget (simple heuristic)
-    let synthesis_model = if row.hot_tier_budget > 1000 {
+    let synthesis_model = if hot_budget.unwrap_or(0) > 1000 {
         "qwen2.5:32b".to_string()
     } else {
         "qwen2.5:14b".to_string()
     };
 
     Ok(NamespaceConsolidationConfig {
-        min_cluster_size: row.consolidation_min_cluster.unwrap_or(5),
+        min_cluster_size: min_cluster.unwrap_or(5),
         synthesis_model,
     })
 }

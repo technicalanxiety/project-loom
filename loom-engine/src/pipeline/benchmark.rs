@@ -336,6 +336,10 @@ async fn compute_retrieval_score(
                 }
             }
             CandidatePayload::Procedure(_) => {}
+            CandidatePayload::Summary(s) => {
+                entity_corpus.push_str(&s.summary_text);
+                entity_corpus.push(' ');
+            }
         }
     }
 
@@ -1154,19 +1158,19 @@ pub async fn reap_stale_benchmark_runs(
     pool: &PgPool,
     threshold_hours: i64,
 ) -> Result<i64, BenchmarkError> {
-    // Format the interval inline rather than binding it — Postgres
-    // doesn't accept a parameter on the right side of an INTERVAL cast.
-    let sql = format!(
+    use sqlx::QueryBuilder;
+    // Use QueryBuilder to construct the query safely. Postgres doesn't accept
+    // a parameter on the right side of an INTERVAL cast, so we multiply by a bind parameter.
+    let mut qb = QueryBuilder::new(
         "WITH reaped AS (\
            UPDATE loom_benchmark_runs \
            SET status = 'failed' \
            WHERE status = 'running' \
-             AND created_at < NOW() - INTERVAL '{threshold_hours} hours' \
-           RETURNING id\
-         ) \
-         SELECT COUNT(*) FROM reaped"
+             AND created_at < NOW() - (INTERVAL '1 hour' * "
     );
-    let count: i64 = sqlx::query_scalar(&sql).fetch_one(pool).await?;
+    qb.push_bind(threshold_hours);
+    qb.push_sql(") RETURNING id) SELECT COUNT(*) FROM reaped");
+    let count: i64 = qb.build_query_scalar().fetch_one(pool).await?;
     if count > 0 {
         tracing::warn!(
             count,

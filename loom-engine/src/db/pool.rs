@@ -96,11 +96,12 @@ impl DbPools {
             .after_connect(move |conn, _meta| {
                 Box::pin(async move {
                     // Set per-connection statement timeout to prevent runaway queries.
-                    sqlx::query(&format!(
-                        "SET statement_timeout = '{statement_timeout_ms}ms'"
-                    ))
-                    .execute(&mut *conn)
-                    .await?;
+                    use sqlx::QueryBuilder;
+                    QueryBuilder::new("SET statement_timeout = ")
+                        .push_bind(format!("{statement_timeout_ms}ms"))
+                        .build()
+                        .execute(&mut *conn)
+                        .await?;
                     Ok(())
                 })
             })
@@ -117,7 +118,10 @@ impl DbPools {
                     // Offline pool gets a longer statement timeout (3x) since
                     // extraction queries can be heavier.
                     let offline_timeout_ms = statement_timeout_ms * 3;
-                    sqlx::query(&format!("SET statement_timeout = '{offline_timeout_ms}ms'"))
+                    use sqlx::QueryBuilder;
+                    QueryBuilder::new("SET statement_timeout = ")
+                        .push_bind(format!("{offline_timeout_ms}ms"))
+                        .build()
                         .execute(&mut *conn)
                         .await?;
                     Ok(())
