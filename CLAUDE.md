@@ -51,8 +51,8 @@ paraphrase, or reconstruct" language — it's load-bearing.
 ### Namespace isolation
 
 Memory in `namespace=a` is invisible to queries in `namespace=b`. No
-cross-namespace retrieval. Every episode, entity, fact, and procedure
-belongs to exactly one namespace.
+cross-namespace retrieval. Every episode, entity, fact, procedure, and
+summary belongs to exactly one namespace.
 
 ### MCP server hardcodes `live_mcp_capture`
 
@@ -129,7 +129,9 @@ burned once by mocked tests passing while a prod migration was broken.
 | Thing | Location |
 |-------|----------|
 | Engine source | `loom-engine/src/` |
-| DB migrations | `loom-engine/migrations/` (001–016+) |
+| DB migrations | `loom-engine/migrations/` (001–020+) |
+| Consolidation worker | `loom-engine/src/worker/consolidator.rs` |
+| Consolidation prompt | `loom-engine/prompts/consolidation.txt` |
 | Dashboard SPA | `loom-dashboard/src/` |
 | Per-client integration guides | `docs/clients/` |
 | Architecture Decision Records | `docs/adr/` |
@@ -166,6 +168,15 @@ burned once by mocked tests passing while a prod migration was broken.
   [ADR-010](docs/adr/010-streaming-telemetry.md). The SSE stream at
   `/dashboard/api/stream/telemetry` pushes a `TelemetrySnapshot` every
   second from an in-process ring buffer — no time-series store.
+- **Touching the consolidation pipeline or summaries?** Re-read
+  [ADR-012](docs/adr/012-consolidation-and-active-forgetting.md). Key
+  invariants: summaries are derived artifacts (not episode content — ADR-005
+  still applies); every claim in a synthesis must cite a source fact UUID from
+  the cluster (hallucination guard rejects uncited UUIDs); invalidated summaries
+  are soft-deleted after `summary_invalidation_ttl_days` (default 30), not
+  immediately. The scheduler runs four jobs now — `daily_consolidation` is the
+  fourth, at a 24-hour interval. Per-namespace schedule and TTL knobs live in
+  `loom_namespace_config` (migrations 018–020 added the columns).
 - **Touching the benchmark?** All three conditions (A/B/C) call the
   chat LLM so the `precision` column is comparable across the row —
   it measures fraction of expected entities mentioned in the answer.

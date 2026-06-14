@@ -19,9 +19,9 @@ context packages for LLM consumption via MCP, REST, and a dashboard UI.
 
 - **loom-engine** (Rust/axum/tokio): Core service — MCP JSON-RPC dispatcher (ADR 008), REST API,
   dashboard API, SSE telemetry stream (ADR 010), offline workers, scheduled tasks. Single binary.
-- **loom-dashboard** (TypeScript/React/Vite): 13-page dashboard — Runtime (live SSE-driven),
+- **loom-dashboard** (TypeScript/React/Vite): 14-page dashboard — Runtime (live SSE-driven),
   Pipeline Health, Compilations, Entities, Predicates, Metrics, Benchmarks, Conflicts,
-  Parser Health, Ingestion Distribution.
+  Parser Health, Ingestion Distribution, Consolidation health.
 - **PostgreSQL 17** + pgvector (pgAudit optional): Single system of record. No external vector
   store, no graph database.
 - **Ollama** (native by default — ADR 002 amendment): Local LLM inference. Extraction model
@@ -35,7 +35,8 @@ context packages for LLM consumption via MCP, REST, and a dashboard UI.
 ## Two Pipelines (Strictly Separated)
 
 - **Online** (latency-sensitive): classify → namespace → retrieve → weight → rank → compile → audit
-- **Offline** (async, never blocks queries): ingest → dedup → embed → extract entities → resolve → extract facts → supersede → state → procedures → snapshot. Each episode moves through a `pending → processing → completed | failed` state machine; the worker applies exponential backoff between retries and parks episodes in `failed` after `EPISODE_MAX_ATTEMPTS` so poison-pill inputs can't generate infinite LLM load (ADR 007). Embedding inputs are bounded at 16K characters and extraction output is schema-constrained (ADR 011) so neither stage produces routine poison pills.
+- **Offline** (async, never blocks queries): ingest → dedup → embed → extract entities → resolve → extract facts → supersede → state → procedures → snapshot. Each episode moves through a `pending → processing → completed | failed` state machine; the worker applies exponential backoff between retries and parks episodes in `failed` after `EPISODE_MAX_ATTEMPTS` so poison-pill inputs can't generate infinite LLM load (ADR 007). Embedding inputs are bounded at 8K characters and extraction output is schema-constrained (ADR 011) so neither stage produces routine poison pills.
+- **Consolidation cycle** (nightly, per-namespace): a fourth scheduled job synthesizes clusters of ≥5 stable facts into `loom_summaries` via LLM (with hallucination guard), then prunes stale procedures, auto-resolves old conflicts, and cleans invalidated summaries. Configurable TTLs per namespace. See ADR 012.
 
 ## Local Development
 
@@ -59,5 +60,5 @@ by default (use `--profile with-docker-ollama` for Linux+CUDA opt-in).
 
 ## Reference
 
-ADR index: `docs/adr/000-template.md` through `011-bounded-inputs-constrained-outputs.md`.
+ADR index: `docs/adr/000-template.md` through `012-consolidation-and-active-forgetting.md`.
 Per-client integration guides: `docs/clients/`.

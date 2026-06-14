@@ -32,6 +32,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Memory consolidation and active forgetting pipeline (ADR-012)
+
+- New nightly background job (`worker/consolidator.rs`) runs two phases per namespace:
+  - **Consolidation**: identifies entities with ≥5 stable, non-superseded facts older than 48 hours
+    (up to 20 clusters per run), calls the offline LLM with `prompts/consolidation.txt` to synthesize
+    a single coherent paragraph, validates every cited fact UUID against the source cluster
+    (hallucination guard — `ConsolidationError::HallucinatedFactReference` on any uncited UUID), and
+    upserts the result into `loom_summaries` with full provenance (`source_facts` UUID array,
+    `synthesis_model`, `synthesis_prompt_ver`, `contains_sole_source`). Summaries are embedded and
+    stored in `loom_summary_state` for warm-tier similarity search.
+  - **Pruning**: soft-deletes procedures where `last_matched_at + 90 days` has elapsed, auto-resolves
+    resolution conflicts older than 60 days, and soft-deletes summaries where
+    `invalidated_at + 30 days` has elapsed. All TTLs are configurable per namespace.
+- Three new migrations:
+  - **018** — `loom_summaries` + `loom_summary_state`: knowledge summary storage with tier, salience,
+    `invalidated_at`, and 768d embedding index.
+  - **019** — `loom_consolidation_log`: telemetry table tracking every consolidation and pruning run
+    with status, counters, duration, and error detail.
+  - **020** — additive columns on `loom_procedures` (`last_matched_at`, `decay_eligible_at`),
+    `loom_resolution_conflicts` (`auto_resolve_at`), `loom_fact_state` (`access_count`), and
+    `loom_namespace_config` (`consolidation_min_cluster`, `consolidation_schedule`,
+    `pruning_procedure_ttl_days`, `pruning_conflict_ttl_days`, `summary_invalidation_ttl_days`).
+- Scheduler (`worker/scheduler.rs`) gains a fourth background job — `daily_consolidation` — on a
+  24-hour interval alongside the existing snapshot, tier management, and entity health check jobs.
+- New dashboard **Consolidation** page (`loom-dashboard/src/pages/ConsolidationPage.tsx`): KPIs
+  (active summaries, invalidated summaries, latest run timestamps), recent run history table, and a
+  "Run consolidation now" button.
+- Two new dashboard API endpoints:
+  - `GET /dashboard/api/consolidation/health/{namespace}` — summary inventory + latest run info.
+  - `POST /dashboard/api/consolidation/run/{namespace}` — immediate manual trigger.
+- ADR-012 documents the design rationale, alternatives considered (summarize at extraction time,
+  no pruning, manual-only), and the invariants (summaries are derived artifacts never merged back
+  into `loom_facts`, hallucination guard is non-negotiable, 48-hour stability window before
+  clustering).
+
 #### Bulk "Retry failed" button on the Runtime dashboard
 
 - New `POST /dashboard/api/episodes/failed/requeue-all` endpoint at

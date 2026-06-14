@@ -84,6 +84,7 @@ graph TB
             Extract[Entity + Fact Extractor<br/>qwen2.5:14b · gemma4:26b · gemma4:e4b<br/>schema-constrained output]
             Resolve[3-Pass Entity Resolver]
             Supersede[Supersession Resolver]
+            Consolidate[Consolidation Worker<br/>Fact clustering · LLM synthesis<br/>Stale-artifact pruning]
         end
 
         subgraph "Telemetry"
@@ -92,7 +93,7 @@ graph TB
     end
 
     subgraph "loom-dashboard"
-        DashUI[React SPA — 13 pages<br/>Runtime · Pipeline Health · Compilations<br/>Entities · Predicates · Metrics · Benchmarks<br/>Conflicts · Parser Health · Distribution]
+        DashUI[React SPA — 14 pages<br/>Runtime · Pipeline Health · Compilations<br/>Entities · Predicates · Metrics · Benchmarks<br/>Conflicts · Parser Health · Distribution<br/>Consolidation]
     end
 
     subgraph "Ollama (native by default, docker opt-in)"
@@ -160,6 +161,7 @@ The online and offline pipelines share PostgreSQL but use **separate connection 
 
 - **Online pipeline** (loom_think): classify → retrieve → weight → rank → compile. Target < 500ms p95.
 - **Offline pipeline** (loom_learn): embed → extract entities → resolve → extract facts → supersede → tier management. Runs as tokio spawned tasks, returns immediately. Each episode moves through a `pending → processing → completed | failed` state machine with exponential backoff on failure (see [ADR-007](docs/adr/007-episode-processing-retry-backoff.md)); permanently-unprocessable episodes surface on the dashboard for operator triage rather than retrying forever. Database side effects before completion are idempotent, so requeueing after a partial failure does not duplicate facts or inflate provenance. Embedding inputs are bounded at 8K characters and extraction output is constrained to a JSON Schema via Ollama's `response_format` so neither stage produces routine poison pills (see [ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)).
+- **Consolidation cycle** (nightly, per namespace): the scheduler's fourth background job synthesizes clusters of ≥5 stable facts into `loom_summaries` via an LLM call with a hallucination guard (every cited fact UUID must exist in the source cluster), then runs a pruning pass that soft-deletes stale procedures (90-day TTL), auto-resolves long-unresolved conflicts (60-day TTL), and cleans up invalidated summaries (30-day TTL). See [ADR-012](docs/adr/012-consolidation-and-active-forgetting.md).
 - **Telemetry sampler**: a 1 Hz background task samples host CPU/memory, Ollama state, pipeline-stage p50 latency, queue counters, and recent failures into an in-process ring buffer. The dashboard subscribes via SSE at `/dashboard/api/stream/telemetry` (see [ADR-010](docs/adr/010-streaming-telemetry.md)). No new tables, no time-series store.
 
 ## Supported Clients
@@ -194,13 +196,14 @@ guide index and the checklist for wiring a new client.
 | **Engine** | Rust (tokio + axum 0.8 + sqlx 0.8) | Single binary serving all APIs. `ring` is the rustls crypto provider (keeps `aws-lc-sys` out of the build). |
 | **Database** | PostgreSQL 17 + pgvector (pgAudit optional) | Single system of record. Vector similarity, graph traversal, application-level audit logging via `loom_audit_log`. |
 | **LLM Inference** | Ollama (native by default) | Hardware-tier extraction model — `qwen2.5:14b` for iGPU/APU, `gemma4:26b` for discrete GPU, `gemma4:e4b` for tight memory (see [ADR-009](docs/adr/009-extraction-model-for-igpu.md)). `gemma4:e4b` for classification, `nomic-embed-text` for embeddings (768d). Extraction calls use `response_format: json_schema` for guaranteed-parseable output ([ADR-011](docs/adr/011-bounded-inputs-constrained-outputs.md)). |
-| **Dashboard** | React 19 + Vite 8 + TypeScript 6 + vitest 4 + biome 2 | 13 pages: Runtime (SSE-driven live status), Pipeline Health, Compilations + detail, Entities + detail, Predicates + Pack detail, Metrics, Benchmarks, Conflicts, Parser Health, Ingestion Distribution. |
+| **Dashboard** | React 19 + Vite 8 + TypeScript 6 + vitest 4 + biome 2 | 14 pages: Runtime (SSE-driven live status), Pipeline Health, Compilations + detail, Entities + detail, Predicates + Pack detail, Metrics, Benchmarks, Conflicts, Parser Health, Ingestion Distribution, Consolidation health. |
 | **Reverse Proxy** | Caddy | Automatic TLS, static file serving, API routing, bearer-token injection on `/dashboard/api/*`. |
 | **Auth** | Bearer token (tower middleware) | Constant-time comparison, applied at router level. External clients (MCP / REST) carry their own token; Caddy injects on behalf of the in-browser SPA. |
 
 ## Key Features
 
 - **Two-pipeline architecture**: Online pipeline for low-latency query serving, offline pipeline for async episode processing
+- **Memory consolidation and active forgetting**: Nightly consolidation synthesizes fact clusters into higher-order summaries; pruning removes stale procedures, old unresolved conflicts, and invalidated summaries
 - **Three memory types**: Episodic (raw interactions), semantic (extracted facts), procedural (behavioral patterns)
 - **Three-pass entity resolution**: Exact match → alias match → semantic similarity (prefers fragmentation over collision)
 - **Pack-aware predicate system**: Canonical predicate registry with domain-specific packs (core, GRC, etc.)
@@ -692,6 +695,7 @@ External clients calling `/mcp/*` or `/api/*` still carry their own bearer token
 | **Benchmarks** | A/B/C condition runs, per-task precision/latency, winner card |
 | **Parser Health** | Per-bootstrap-parser episode counts, parser versions, freshness pills, last-ingested timestamps |
 | **Ingestion Mode Distribution** | Per-namespace Mode 1/2/3 breakdown with a seed-only warning list |
+| **Consolidation** | Knowledge summary synthesis and stale-artifact pruning. KPIs: active summaries, invalidated summaries, latest run timestamps. Recent consolidation/pruning run history. "Run consolidation now" button triggers an immediate cycle. |
 
 ### Dashboard API Endpoints
 
@@ -728,6 +732,8 @@ All dashboard endpoints are under `/dashboard/api/`. Requests flow through Caddy
 | POST | `/dashboard/api/benchmarks/run` | Create a benchmark run row and return it immediately while the run continues in the background |
 | POST | `/dashboard/api/benchmarks/{id}/cancel` | Mark a running benchmark as failed so the runner stops before starting the next task condition |
 | GET | `/dashboard/api/stream/telemetry` | Server-Sent Events stream — `TelemetrySnapshot` every 1 s. Powers the Runtime page. |
+| GET | `/dashboard/api/consolidation/health/{namespace}` | Consolidation health: active/invalidated summary counts, latest consolidation and pruning run, recent run history |
+| POST | `/dashboard/api/consolidation/run/{namespace}` | Trigger an immediate consolidation + pruning cycle for a namespace (same logic as the nightly scheduled run) |
 
 ---
 
@@ -858,10 +864,11 @@ project-loom/
 │   │   ├── db/                         # Database layer (sqlx)
 │   │   │   ├── pool.rs                 # Online + offline connection pools
 │   │   │   ├── episodes.rs             # Episode CRUD
-│   │   │   ├── entities.rs             # Entity CRUD + resolution
+│   │   │   ├── entities.rs             # Entity CRUD + resolution + summaries
 │   │   │   ├── facts.rs                # Fact CRUD + supersession
 │   │   │   ├── predicates.rs           # Predicate registry + packs
-│   │   │   ├── procedures.rs           # Procedure queries
+│   │   │   ├── procedures.rs           # Procedure queries + stale-prune
+│   │   │   ├── consolidation.rs        # Consolidation log CRUD
 │   │   │   ├── audit.rs                # Audit log writes
 │   │   │   ├── snapshots.rs            # Hot-tier snapshots
 │   │   │   ├── traverse.rs             # Graph traversal (loom_traverse)
@@ -894,7 +901,8 @@ project-loom/
 │   │   │   └── auth.rs                 # Bearer token middleware
 │   │   ├── worker/
 │   │   │   ├── processor.rs            # Background processing (claim, extract, retry/backoff per ADR-007)
-│   │   │   └── scheduler.rs            # Periodic tasks (snapshots, health)
+│   │   │   ├── consolidator.rs         # Consolidation + pruning phases (ADR-012)
+│   │   │   └── scheduler.rs            # Periodic tasks: snapshots, tier mgmt, health check, consolidation
 │   │   ├── telemetry/                  # SSE telemetry sampler + ring buffers (ADR-010)
 │   │   │   ├── state.rs                # In-process state, sparkline ring buffers, error tail
 │   │   │   └── sampler.rs              # 1 Hz / 5 s background sampler
@@ -905,13 +913,16 @@ project-loom/
 │   │       ├── predicate.rs
 │   │       ├── classification.rs
 │   │       ├── compilation.rs
+│   │       ├── consolidation.rs        # ConsolidationLog, ConsolidationRun types
+│   │       ├── summary.rs              # KnowledgeSummary, SynthesisResponse types
 │   │       ├── audit.rs
 │   │       └── mcp.rs
-│   ├── migrations/                     # PostgreSQL migrations (001-016)
+│   ├── migrations/                     # PostgreSQL migrations (001-020)
 │   └── prompts/                        # LLM prompt templates
 │       ├── entity_extraction.txt
 │       ├── fact_extraction.txt
-│       └── classification.txt
+│       ├── classification.txt
+│       └── consolidation.txt           # Fact-cluster synthesis prompt (ADR-012)
 │
 ├── loom-dashboard/                     # React SPA
 │   ├── package.json
@@ -941,7 +952,8 @@ project-loom/
 │   │   ├── 008-mcp-wire-protocol.md                  # JSON-RPC 2.0 dispatcher at POST /mcp
 │   │   ├── 009-extraction-model-for-igpu.md          # qwen2.5:14b for shared-memory hosts
 │   │   ├── 010-streaming-telemetry.md                # SSE Runtime page
-│   │   └── 011-bounded-inputs-constrained-outputs.md # 8K embed cap + json_schema extraction
+│   │   ├── 011-bounded-inputs-constrained-outputs.md # 8K embed cap + json_schema extraction
+│   │   └── 012-consolidation-and-active-forgetting.md # Nightly consolidation + pruning pipeline
 │   └── clients/                        # Per-client integration guides
 │       ├── README.md                   # Index + new-client checklist
 │       ├── claude-code.md
