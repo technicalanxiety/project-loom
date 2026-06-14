@@ -204,6 +204,10 @@ pub fn estimate_candidate_tokens(candidate: &RetrievalCandidate) -> usize {
         }
         CandidatePayload::Graph(_) => 30,
         CandidatePayload::Procedure(_) => 40,
+        CandidatePayload::Summary(s) => {
+            // ~1 token per 4 characters, clamped to [50, 300].
+            (s.summary_text.len() / 4).clamp(50, 300)
+        }
     }
 }
 
@@ -523,6 +527,17 @@ pub fn format_structured(
                     p.observation_count,
                 ));
             }
+            CandidatePayload::Summary(s) => {
+                facts.push(format_structured_fact(
+                    &s.subject_entity_id.to_string(),
+                    "summary",
+                    &s.summary_text,
+                    &s.evidence_status,
+                    None,
+                    &s.namespace,
+                    sole_source,
+                ));
+            }
         }
     }
 
@@ -805,6 +820,19 @@ pub fn format_compact(
                     "c": p.confidence,
                     "n": p.observation_count,
                 }));
+            }
+            CandidatePayload::Summary(s) => {
+                let mut obj = serde_json::json!({
+                    "s": s.subject_entity_id.to_string(),
+                    "p": "summary",
+                    "o": s.summary_text,
+                    "e": s.evidence_status,
+                    "t": "",
+                });
+                if let Some(b) = sole_source {
+                    obj["sole_source"] = serde_json::Value::Bool(b);
+                }
+                facts.push(obj);
             }
         }
     }

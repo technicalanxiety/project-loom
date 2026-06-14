@@ -4,7 +4,6 @@
 //! synthesizing knowledge summaries, and pruning stale derived artifacts.
 //! Runs on a scheduled basis (configurable per namespace) during off-peak hours.
 
-use chrono::Utc;
 use pgvector::Vector;
 use sqlx::PgPool;
 use std::time::Instant;
@@ -12,9 +11,6 @@ use uuid::Uuid;
 
 use crate::db::{consolidation, entities, procedures};
 use crate::llm::client::LlmClient;
-use crate::types::consolidation::{ConsolidationLog, ConsolidationRunType};
-use crate::types::entity::Entity;
-use crate::types::fact::Fact;
 use crate::types::summary::{ConsolidationResult, SynthesisResponse};
 
 /// Errors that can occur during consolidation.
@@ -224,15 +220,16 @@ async fn synthesize_cluster(
         .join("\n");
 
     // Load and format consolidation prompt
-    let prompt = format_consolidation_prompt(&cluster.entity_name, &cluster.entity_type, &cluster.namespace, &fact_list);
+    let system_prompt = include_str!("../../prompts/consolidation.txt");
+    let user_prompt = format_consolidation_prompt(&cluster.entity_name, &cluster.entity_type, &cluster.namespace, &fact_list);
 
     // Call LLM
-    let response_text = llm
-        .call_llm(&model, &prompt)
+    let response = llm
+        .call_llm(&model, system_prompt, &user_prompt)
         .await
         .map_err(|e| ConsolidationError::Llm(e.to_string()))?;
 
-    let synthesis: SynthesisResponse = serde_json::from_str(&response_text)?;
+    let synthesis: SynthesisResponse = serde_json::from_value(response)?;
 
     // Validate coverage: all referenced facts must be in the cluster
     for coverage_item in &synthesis.coverage {

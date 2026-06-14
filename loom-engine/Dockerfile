@@ -28,7 +28,9 @@ COPY prompts/ prompts/
 COPY seed/ seed/
 
 # Build the release binary
-RUN cargo build --release && \
+# Use SQLX_OFFLINE=true since we can't have a database during Docker build.
+# sqlx compile-time checked queries will be validated at development time.
+RUN SQLX_OFFLINE=true cargo build --release && \
     strip /build/target/release/loom-engine
 
 # ── Stage 2: Runtime (minimal Debian for shell + health checks) ─
