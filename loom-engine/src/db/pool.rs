@@ -96,12 +96,10 @@ impl DbPools {
             .after_connect(move |conn, _meta| {
                 Box::pin(async move {
                     // Set per-connection statement timeout to prevent runaway queries.
-                    use sqlx::QueryBuilder;
-                    QueryBuilder::new("SET statement_timeout = ")
-                        .push_bind(format!("{statement_timeout_ms}ms"))
-                        .build()
-                        .execute(&mut *conn)
-                        .await?;
+                    // PostgreSQL SET doesn't accept bind parameters, but statement_timeout_ms
+                    // is controlled internally, not user input, so format!() is safe here.
+                    let stmt = format!("SET statement_timeout = '{statement_timeout_ms}ms'");
+                    sqlx::query(&stmt).execute(&mut *conn).await?;
                     Ok(())
                 })
             })
@@ -118,12 +116,10 @@ impl DbPools {
                     // Offline pool gets a longer statement timeout (3x) since
                     // extraction queries can be heavier.
                     let offline_timeout_ms = statement_timeout_ms * 3;
-                    use sqlx::QueryBuilder;
-                    QueryBuilder::new("SET statement_timeout = ")
-                        .push_bind(format!("{offline_timeout_ms}ms"))
-                        .build()
-                        .execute(&mut *conn)
-                        .await?;
+                    // PostgreSQL SET doesn't accept bind parameters, but offline_timeout_ms
+                    // is controlled internally, not user input, so format!() is safe here.
+                    let stmt = format!("SET statement_timeout = '{offline_timeout_ms}ms'");
+                    sqlx::query(&stmt).execute(&mut *conn).await?;
                     Ok(())
                 })
             })
