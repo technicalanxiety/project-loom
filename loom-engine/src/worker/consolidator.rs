@@ -5,6 +5,7 @@
 //! Runs on a scheduled basis (configurable per namespace) during off-peak hours.
 
 use chrono::Utc;
+use pgvector::Vector;
 use sqlx::PgPool;
 use std::time::Instant;
 use uuid::Uuid;
@@ -227,7 +228,7 @@ async fn synthesize_cluster(
 
     // Call LLM
     let response_text = llm
-        .chat_completion(&prompt)
+        .call_llm(&model, &prompt)
         .await
         .map_err(|e| ConsolidationError::Llm(e.to_string()))?;
 
@@ -276,10 +277,11 @@ async fn synthesize_cluster(
     .map_err(|e| ConsolidationError::Database(e.to_string()))?;
 
     // Embed and store state
-    let embedding = llm
-        .embed(&synthesis.summary_text)
+    let embedding_vec = llm
+        .call_embeddings(&model, &synthesis.summary_text)
         .await
         .map_err(|e| ConsolidationError::Llm(e.to_string()))?;
+    let embedding = Vector::from(embedding_vec);
 
     let token_count = estimate_tokens(&synthesis.summary_text);
 
