@@ -1,5 +1,5 @@
 # Build stage
-FROM node:22-slim AS builder
+FROM node:22.23-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
