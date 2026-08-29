@@ -217,6 +217,23 @@ pub async fn query_failed_consolidation_runs(
 // Update
 // ---------------------------------------------------------------------------
 
+/// Final run metrics for a completed consolidation or pruning log entry.
+#[derive(Debug, Default)]
+pub struct ConsolidationMetrics {
+    /// Number of clusters found (consolidation only).
+    pub clusters_found: Option<i32>,
+    /// Number of new summaries created (consolidation only).
+    pub summaries_created: Option<i32>,
+    /// Number of existing summaries refreshed (consolidation only).
+    pub summaries_refreshed: Option<i32>,
+    /// Number of procedures pruned (pruning only).
+    pub procedures_pruned: Option<i32>,
+    /// Number of conflicts auto-resolved (pruning only).
+    pub conflicts_resolved: Option<i32>,
+    /// Number of summaries invalidated (pruning only).
+    pub summaries_invalidated: Option<i32>,
+}
+
 /// Mark a consolidation log entry as completed.
 ///
 /// Updates status to 'completed', sets completed_at, and records final metrics
@@ -224,12 +241,7 @@ pub async fn query_failed_consolidation_runs(
 pub async fn complete_consolidation_log(
     pool: &PgPool,
     id: Uuid,
-    clusters_found: Option<i32>,
-    summaries_created: Option<i32>,
-    summaries_refreshed: Option<i32>,
-    procedures_pruned: Option<i32>,
-    conflicts_resolved: Option<i32>,
-    summaries_invalidated: Option<i32>,
+    metrics: ConsolidationMetrics,
     duration_ms: i32,
 ) -> Result<ConsolidationLog, ConsolidationError> {
     let row = sqlx::query_as::<_, ConsolidationLog>(
@@ -249,12 +261,12 @@ pub async fn complete_consolidation_log(
         "#,
     )
     .bind(id)
-    .bind(clusters_found)
-    .bind(summaries_created)
-    .bind(summaries_refreshed)
-    .bind(procedures_pruned)
-    .bind(conflicts_resolved)
-    .bind(summaries_invalidated)
+    .bind(metrics.clusters_found)
+    .bind(metrics.summaries_created)
+    .bind(metrics.summaries_refreshed)
+    .bind(metrics.procedures_pruned)
+    .bind(metrics.conflicts_resolved)
+    .bind(metrics.summaries_invalidated)
     .bind(duration_ms)
     .fetch_one(pool)
     .await?;

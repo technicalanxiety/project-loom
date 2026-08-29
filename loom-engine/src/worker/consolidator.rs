@@ -225,7 +225,7 @@ async fn synthesize_cluster(
 
     // Call LLM
     let response = llm
-        .call_llm(&model, system_prompt, &user_prompt)
+        .call_llm(model, system_prompt, &user_prompt)
         .await
         .map_err(|e| ConsolidationError::Llm(e.to_string()))?;
 
@@ -240,16 +240,8 @@ async fn synthesize_cluster(
         }
     }
 
-    // Check evidence status of cluster
-    let evidence_status = if cluster
-        .facts
-        .iter()
-        .any(|f| f.evidence_status == "sole_source_flagged")
-    {
-        "extracted"
-    } else {
-        "extracted" // All summaries start as extracted
-    };
+    // All summaries start as "extracted" regardless of sole-source flagging.
+    let evidence_status = "extracted";
 
     let contains_sole_source = cluster
         .facts
@@ -278,7 +270,7 @@ async fn synthesize_cluster(
 
     // Embed and store state
     let embedding_vec = llm
-        .call_embeddings(&model, &summary_text)
+        .call_embeddings(model, &summary_text)
         .await
         .map_err(|e| ConsolidationError::Llm(e.to_string()))?;
     let embedding = Vector::from(embedding_vec);
@@ -365,21 +357,24 @@ pub async fn run_pruning_phase(
 
 /// Configuration for a namespace's consolidation behavior.
 struct NamespaceConsolidationConfig {
-    min_cluster_size: i32,
     synthesis_model: String,
 }
 
 /// Get consolidation configuration for a namespace.
+///
+/// `min_cluster_size` is not read here — callers (e.g.
+/// `scheduler::run_consolidation_cycle`) already fetch the per-namespace
+/// `consolidation_min_cluster` value and pass it directly into
+/// [`run_consolidation_phase`].
 async fn get_namespace_config(
     pool: &PgPool,
     namespace: &str,
 ) -> Result<NamespaceConsolidationConfig, sqlx::Error> {
-    let (min_cluster, hot_budget) = sqlx::query_as::<_, (Option<i32>, Option<i32>)>(
-        "SELECT consolidation_min_cluster, hot_tier_budget FROM loom_namespace_config WHERE namespace = $1",
-    )
-    .bind(namespace)
-    .fetch_one(pool)
-    .await?;
+    let (hot_budget,): (Option<i32>,) =
+        sqlx::query_as("SELECT hot_tier_budget FROM loom_namespace_config WHERE namespace = $1")
+            .bind(namespace)
+            .fetch_one(pool)
+            .await?;
 
     // Determine synthesis model based on tier budget (simple heuristic)
     let synthesis_model = if hot_budget.unwrap_or(0) > 1000 {
@@ -388,10 +383,7 @@ async fn get_namespace_config(
         "qwen2.5:14b".to_string()
     };
 
-    Ok(NamespaceConsolidationConfig {
-        min_cluster_size: min_cluster.unwrap_or(5),
-        synthesis_model,
-    })
+    Ok(NamespaceConsolidationConfig { synthesis_model })
 }
 
 /// Format the consolidation prompt with cluster details.
