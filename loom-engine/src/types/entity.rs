@@ -391,6 +391,7 @@ mod tests {
             resolution: None,
             resolved_at: None,
             created_at: None,
+            auto_resolve_at: None,
         };
 
         assert_eq!(conflict.entity_name, "APIM");

@@ -879,8 +879,8 @@ mod tests {
         let cancel_token = CancellationToken::new();
         let pool = dummy_pool();
 
-        let handles = start_scheduler(pool, cancel_token.clone());
-        assert_eq!(handles.len(), 3, "should spawn 3 scheduled tasks");
+        let handles = start_scheduler(pool, dummy_llm_client(), cancel_token.clone());
+        assert_eq!(handles.len(), 4, "should spawn 4 scheduled tasks");
 
         // Cancel immediately.
         cancel_token.cancel();
@@ -922,6 +922,22 @@ mod tests {
             .max_connections(1)
             .connect_lazy("postgres://invalid:5432/nonexistent")
             .expect("connect_lazy should not fail")
+    }
+
+    /// Create an LlmClient pointed at an unreachable URL. Only for testing
+    /// cancellation paths where the client is never actually invoked —
+    /// `LlmClient::new` builds a plain reqwest client with no network call,
+    /// so this never fails or connects.
+    fn dummy_llm_client() -> LlmClient {
+        let config = crate::config::LlmConfig {
+            ollama_url: "http://invalid.invalid:0".to_string(),
+            extraction_model: "test-model".to_string(),
+            classification_model: "test-model".to_string(),
+            embedding_model: "test-model".to_string(),
+            azure_openai_url: None,
+            azure_openai_key: None,
+        };
+        LlmClient::new(&config).expect("should build client")
     }
 
     // -- Snapshot token estimation ------------------------------------------
@@ -1068,12 +1084,12 @@ mod tests {
     // -- Scheduler spawns correct number of tasks ---------------------------
 
     #[tokio::test]
-    async fn scheduler_spawns_three_tasks() {
+    async fn scheduler_spawns_four_tasks() {
         let cancel_token = CancellationToken::new();
         let pool = dummy_pool();
 
-        let handles = start_scheduler(pool, cancel_token.clone());
-        assert_eq!(handles.len(), 3, "scheduler should spawn exactly 3 tasks");
+        let handles = start_scheduler(pool, dummy_llm_client(), cancel_token.clone());
+        assert_eq!(handles.len(), 4, "scheduler should spawn exactly 4 tasks");
 
         cancel_token.cancel();
         for handle in handles {
