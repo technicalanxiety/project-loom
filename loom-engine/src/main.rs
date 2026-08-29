@@ -2,8 +2,9 @@
 
 use axum::{
     extract::DefaultBodyLimit,
+    http::StatusCode,
     middleware,
-    routing::{get, post},
+    routing::{any, get, post},
     Router,
 };
 use std::net::SocketAddr;
@@ -34,6 +35,11 @@ use api::mcp::{handle_loom_learn, handle_loom_recall, handle_loom_think, AppStat
 use api::mcp_rpc::handle_mcp_rpc;
 use api::rest::{handle_api_learn, handle_github_webhook, handle_health};
 use worker::{processor, scheduler};
+
+/// Plain 404 for OAuth discovery paths Loom never implements.
+async fn oauth_discovery_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
+}
 
 #[tokio::main]
 async fn main() {
@@ -161,6 +167,28 @@ async fn main() {
     let public_routes = Router::new()
         .route("/api/health", get(handle_health))
         .with_state(state.clone());
+
+    // OAuth discovery paths — Loom does not support OAuth. MCP clients on
+    // the streamable-HTTP transport (mcp-remote, Claude Desktop's native
+    // HTTP transport) probe these before falling back to a configured
+    // static bearer token. Returning a plain, unauthenticated 404 (instead
+    // of leaving them unrouted) tells clients "no OAuth here" so they use
+    // the static header rather than misreading a 401 as an OAuth challenge
+    // and attempting dynamic client registration against `/register`.
+    let oauth_discovery_noop = Router::new()
+        .route(
+            "/.well-known/oauth-protected-resource",
+            any(oauth_discovery_not_found),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            any(oauth_discovery_not_found),
+        )
+        .route(
+            "/.well-known/openid-configuration",
+            any(oauth_discovery_not_found),
+        )
+        .route("/register", any(oauth_discovery_not_found));
 
     // Dashboard routes — all protected by bearer token middleware.
     let dashboard_routes = Router::new()
@@ -294,6 +322,7 @@ async fn main() {
         .merge(rest_learn_route)
         .merge(webhook_routes)
         .merge(public_routes)
+        .merge(oauth_discovery_noop)
         .merge(dashboard_routes);
 
     // ── Background workers ──────────────────────────────────────────

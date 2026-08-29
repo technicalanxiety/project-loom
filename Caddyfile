@@ -57,6 +57,20 @@ localhost, {$LOOM_HOST:localhost} {
 		}
 	}
 
+	# ── OAuth discovery no-op → loom-engine ──────────────────
+	# Loom does not support OAuth. MCP clients on the streamable-HTTP
+	# transport (mcp-remote, Claude Desktop's native HTTP transport) probe
+	# these paths before falling back to their configured static bearer
+	# token. Without this route, they fall through to the SPA catch-all
+	# below and get a 200 HTML response (index.html via try_files),
+	# which breaks JSON-parsing OAuth discovery clients. Proxied
+	# unauthenticated to loom-engine's dedicated 404 routes so clients
+	# see a clean 404 and correctly conclude "no OAuth here."
+	@oauth_discovery path /.well-known/oauth-protected-resource /.well-known/oauth-authorization-server /.well-known/openid-configuration /register
+	handle @oauth_discovery {
+		reverse_proxy loom-engine:8080
+	}
+
 	# ── Dashboard static files (SPA fallback) ────────────────
 	handle {
 		root * /srv/dashboard
